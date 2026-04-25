@@ -5,7 +5,7 @@ project_name: lps
 
 before:
   hooks:
-    - go mod tidy
+    - sh -c "cd cli && go mod tidy"
 
 builds:
   - id: lps
@@ -25,13 +25,12 @@ builds:
       - -s -w -X main.version={{.Version}}
 
 archives:
-  - id: lps
-    builds: [lps]
+  - ids: [lps]
     name_template: "lps_{{ .Os }}_{{ .Arch }}"
-    format: tar.gz
+    formats: [tar.gz]
     format_overrides:
       - goos: windows
-        format: zip
+        formats: [zip]
     files:
       - LICENSE
       - README.md
