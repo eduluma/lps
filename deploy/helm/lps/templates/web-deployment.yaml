@@ -1,0 +1,69 @@
+# ── Deployment ───────────────────────────────────────────────────────────────
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ .Release.Name }}-web
+  namespace: {{ .Values.global.namespace }}
+  labels:
+    app: lps-web
+    {{- include "lps.labels" . | nindent 4 }}
+spec:
+  replicas: {{ .Values.web.replicaCount }}
+  selector:
+    matchLabels:
+      app: lps-web
+  template:
+    metadata:
+      labels:
+        app: lps-web
+    spec:
+      {{- with .Values.global.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      containers:
+        - name: web
+          image: {{ include "lps.image" (dict "local" .Values.web.image "global" .Values.global.image "name" "web") }}
+          imagePullPolicy: {{ include "lps.pullPolicy" (dict "local" .Values.web.image "global" .Values.global.image) }}
+          ports:
+            - containerPort: 4321
+              protocol: TCP
+          env:
+            # Browser-facing: user's machine resolves this.
+            - name: PUBLIC_API_BASE
+              value: {{ .Values.web.env.PUBLIC_API_BASE | quote }}
+            # SSR: stays inside the cluster — must use service name.
+            - name: API_INTERNAL_BASE
+              value: {{ printf "http://%s-api:8000/api/v1" .Release.Name | quote }}
+            {{- range $key, $val := .Values.web.env }}
+            {{- if and (ne $key "PUBLIC_API_BASE") (ne $key "API_INTERNAL_BASE") }}
+            - name: {{ $key }}
+              value: {{ $val | quote }}
+            {{- end }}
+            {{- end }}
+          readinessProbe:
+            httpGet:
+              path: /
+              port: 4321
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          resources:
+            {{- toYaml .Values.web.resources | nindent 12 }}
+---
+# ── Service ──────────────────────────────────────────────────────────────────
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ .Release.Name }}-web
+  namespace: {{ .Values.global.namespace }}
+  labels:
+    app: lps-web
+    {{- include "lps.labels" . | nindent 4 }}
+spec:
+  type: ClusterIP
+  selector:
+    app: lps-web
+  ports:
+    - port: 4321
+      targetPort: 4321
+      protocol: TCP

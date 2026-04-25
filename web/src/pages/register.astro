@@ -1,0 +1,235 @@
+---
+import Base from "../layouts/Base.astro";
+
+const publicApiBase: string =
+    import.meta.env.PUBLIC_API_BASE ?? "http://localhost:8000/api/v1";
+const apiDisplayBase = publicApiBase.replace(/\/api\/v1\/?$/, "");
+---
+
+<Base title="Get API Token — LPS">
+    <div class="max-w-xl">
+        <h1 class="text-2xl font-semibold mb-1">Get an API Token</h1>
+        <p class="text-stone-500 text-sm mb-8">
+            Register once, receive a permanent token. Use it to submit package
+            suggestions via <code
+                class="font-mono text-xs bg-stone-100 px-1 py-0.5 rounded"
+                >curl</code
+            >
+            or any HTTP client — with a higher rate limit and attribution on your
+            contributions.
+        </p>
+
+        <div id="form-wrap">
+            <form id="reg-form" novalidate class="space-y-5">
+                <div>
+                    <label
+                        class="block text-sm font-medium text-stone-700 mb-1"
+                        for="email"
+                    >
+                        Email <span class="text-red-500">*</span>
+                    </label>
+                    <input
+                        id="email"
+                        name="email"
+                        type="email"
+                        required
+                        placeholder="you@example.com"
+                        class="w-full rounded-lg border border-stone-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-stone-400"
+                    />
+                    <p class="mt-1 text-xs text-stone-400">
+                        Used only for deduplication — one token per email. We
+                        don't send mail.
+                    </p>
+                </div>
+
+                <div>
+                    <label
+                        class="block text-sm font-medium text-stone-700 mb-1"
+                        for="display_name"
+                    >
+                        Name <span class="text-red-500">*</span>
+                    </label>
+                    <input
+                        id="display_name"
+                        name="display_name"
+                        type="text"
+                        required
+                        maxlength="100"
+                        placeholder="Your name or organisation name"
+                        class="w-full rounded-lg border border-stone-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-stone-400"
+                    />
+                </div>
+
+                <div>
+                    <p class="block text-sm font-medium text-stone-700 mb-2">
+                        Account type
+                    </p>
+                    <div class="flex gap-4 text-sm">
+                        <label class="flex items-center gap-2 cursor-pointer">
+                            <input
+                                type="radio"
+                                name="account_type"
+                                value="individual"
+                                checked
+                                class="accent-stone-800"
+                            />
+                            Individual
+                        </label>
+                        <label class="flex items-center gap-2 cursor-pointer">
+                            <input
+                                type="radio"
+                                name="account_type"
+                                value="org"
+                                class="accent-stone-800"
+                            />
+                            Organisation / Team
+                        </label>
+                    </div>
+                </div>
+
+                <div
+                    id="form-error"
+                    class="hidden rounded-lg bg-red-50 border border-red-200 text-red-700 text-sm px-4 py-3"
+                >
+                </div>
+
+                <button
+                    type="submit"
+                    id="submit-btn"
+                    class="w-full bg-stone-900 text-white rounded-lg px-5 py-2.5 text-sm font-medium hover:bg-stone-700 transition-colors disabled:opacity-50"
+                >
+                    Register &amp; get token
+                </button>
+            </form>
+        </div>
+    </div>
+</Base>
+
+<script>
+    const API_BASE =
+        (import.meta.env.PUBLIC_API_BASE as string | undefined) ??
+        "http://localhost:8000/api/v1";
+
+    const form = document.getElementById("reg-form") as HTMLFormElement;
+    const errBox = document.getElementById("form-error") as HTMLDivElement;
+    const submitBtn = document.getElementById(
+        "submit-btn",
+    ) as HTMLButtonElement;
+    const formWrap = document.getElementById("form-wrap") as HTMLDivElement;
+
+    function showError(msg: string) {
+        errBox.textContent = msg;
+        errBox.classList.remove("hidden");
+        submitBtn.disabled = false;
+        submitBtn.textContent = "Register & get token";
+    }
+
+    form.addEventListener("submit", async (e) => {
+        e.preventDefault();
+        errBox.classList.add("hidden");
+        submitBtn.disabled = true;
+        submitBtn.textContent = "Registering…";
+
+        const email = (
+            document.getElementById("email") as HTMLInputElement
+        ).value.trim();
+        const display_name = (
+            document.getElementById("display_name") as HTMLInputElement
+        ).value.trim();
+        const account_type =
+            (
+                document.querySelector(
+                    "[name=account_type]:checked",
+                ) as HTMLInputElement
+            )?.value ?? "individual";
+
+        if (!email) return showError("Email is required.");
+        if (!display_name) return showError("Name is required.");
+
+        try {
+            const res = await fetch(`${API_BASE}/auth/register`, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ email, display_name, account_type }),
+            });
+
+            if (res.status === 409) {
+                return showError("An account with that email already exists.");
+            }
+            if (!res.ok) {
+                const err = await res.json().catch(() => null);
+                const detail = err?.detail;
+                const msg = Array.isArray(detail)
+                    ? detail.map((d: any) => d.msg).join("; ")
+                    : (detail ??
+                      "Registration failed. Please check your inputs.");
+                return showError(msg);
+            }
+
+            const { token, display_name: name } = await res.json();
+
+            // ── Success state ────────────────────────────────────────────────────
+            const apiBase = API_BASE;
+            formWrap.innerHTML = `
+        <div class="space-y-6">
+          <div class="rounded-xl border border-green-200 bg-green-50 px-6 py-5">
+            <p class="text-green-700 font-medium mb-1">You're registered, ${name}!</p>
+            <p class="text-green-600 text-sm">Your API token is shown below. <strong>Save it now</strong> — it won't be shown again.</p>
+          </div>
+
+          <div>
+            <p class="text-sm font-medium text-stone-700 mb-2">Your token</p>
+            <div class="flex items-center gap-2 rounded-lg border border-stone-300 bg-stone-50 px-4 py-3">
+              <code id="token-display" class="flex-1 font-mono text-sm text-stone-800 break-all">${token}</code>
+              <button id="copy-token"
+                class="shrink-0 px-3 py-1.5 text-xs rounded border border-stone-300 bg-white hover:bg-stone-100 transition-colors">
+                Copy
+              </button>
+            </div>
+            <p class="mt-1 text-xs text-red-600 font-medium">⚠ This is the only time your token will be displayed.</p>
+          </div>
+
+          <div>
+            <p class="text-sm font-medium text-stone-700 mb-2">Using your token with curl</p>
+            <pre class="rounded-lg bg-stone-900 text-stone-100 text-xs font-mono p-4 overflow-x-auto leading-6"><span class="text-stone-400"># Submit a package suggestion (20/day limit)</span>
+curl -s -X POST ${apiBase}/suggestions \\
+  -H "Authorization: Bearer ${token}" \\
+  -H "Content-Type: application/json" \\
+  -d '{
+    "package_name": "bat",
+    "distro": "debian",
+    "release": "bookworm",
+    "install_cmd": "sudo apt install bat",
+    "description": "A cat clone with syntax highlighting",
+    "homepage_url": "https://github.com/sharkdp/bat"
+  }'</pre>
+          </div>
+
+          <div class="flex gap-3 text-sm">
+            <a href="/suggestions"
+               class="px-4 py-2 rounded-lg bg-stone-900 text-white hover:bg-stone-700 transition-colors">
+              Browse suggestions
+            </a>
+            <a href="/suggest"
+               class="px-4 py-2 rounded-lg border border-stone-300 hover:bg-stone-100 transition-colors">
+              Submit via form
+            </a>
+          </div>
+        </div>`;
+
+            // Copy button
+            document
+                .getElementById("copy-token")
+                ?.addEventListener("click", async () => {
+                    await navigator.clipboard.writeText(token);
+                    const btn = document.getElementById("copy-token")!;
+                    btn.textContent = "Copied!";
+                    setTimeout(() => {
+                        btn.textContent = "Copy";
+                    }, 2000);
+                });
+        } catch {
+            showError("Network error — is the API running?");
+        }
+    });
+</script>

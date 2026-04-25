@@ -1,0 +1,157 @@
+name: lps
+
+services:
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: lps
+      POSTGRES_PASSWORD: lps
+      POSTGRES_DB: lps
+    ports:
+      - "5432:5432"
+    volumes:
+      - lps_pgdata:/var/lib/postgresql/data
+      - ./db/migrations:/migrations:ro
+    healthcheck:
+      test: [ "CMD-SHELL", "pg_isready -U lps -d lps" ]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  migrate:
+    build:
+      context: .
+      dockerfile: api/Dockerfile
+    command: [ "uv", "run", "alembic", "upgrade", "head" ]
+    working_dir: /app/api
+    environment:
+      DATABASE_URL: postgresql://lps:lps@db:5432/lps
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: "no"
+
+  seed:
+    build:
+      context: .
+      dockerfile: api/Dockerfile
+    command: [ "uv", "run", "python", "-m", "app.seed" ]
+    working_dir: /app/api
+    environment:
+      DATABASE_URL: postgresql://lps:lps@db:5432/lps
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    restart: "no"
+
+  api:
+    build:
+      context: .
+      dockerfile: api/Dockerfile
+    command:
+      [
+        "uv",
+        "run",
+        "uvicorn",
+        "app.main:app",
+        "--host",
+        "0.0.0.0",
+        "--port",
+        "8000",
+        "--reload",
+        "--reload-dir",
+        "app",
+      ]
+    working_dir: /app/api
+    environment:
+      DATABASE_URL: postgresql://lps:lps@db:5432/lps
+      API_CORS_ORIGINS: http://localhost:4321,https://lps.eduluma.org
+      LOG_LEVEL: info
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./api:/app/api
+      - ./db:/app/db
+    depends_on:
+      db:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+
+  ingest:
+    # On-demand worker; not started by default. Run with:
+    #   docker compose run --rm ingest debian bookworm
+    profiles: [ "tools" ]
+    build:
+      context: ./ingest
+      dockerfile: Dockerfile
+    working_dir: /app/ingest
+    environment:
+      DATABASE_URL: postgresql://lps:lps@db:5432/lps
+    volumes:
+      - ./ingest:/app/ingest
+    entrypoint: [ "uv", "run", "python", "-m", "lps_ingest.cli" ]
+    depends_on:
+      db:
+        condition: service_healthy
+
+  ingest-worker:
+    # Persistent queue worker: polls ingest_jobs for pending work.
+    # Started with the default `docker compose up -d`.
+    build:
+      context: ./ingest
+      dockerfile: Dockerfile
+    working_dir: /app/ingest
+    environment:
+      DATABASE_URL: postgresql://lps:lps@db:5432/lps
+      INGEST_POLL_INTERVAL: "30"
+    volumes:
+      - ./ingest:/app/ingest
+    entrypoint: [ "uv", "run", "python", "-m", "lps_ingest.cli", "worker" ]
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+
+  web:
+    build:
+      context: ./web
+      dockerfile: Dockerfile
+    command: [ "pnpm", "dev" ]
+    working_dir: /app/web
+    environment:
+      # Browser-side (PUBLIC_*) → user's machine hits localhost:8000.
+      # Server-side (SSR frontmatter inside container) → must use Docker service name.
+      PUBLIC_API_BASE: http://localhost:8000/api/v1
+      API_INTERNAL_BASE: http://api:8000/api/v1
+      # Gitea releases — used by /cli page (SSR fetch for latest binary links).
+      # PUBLIC_GITEA_BASE is sent to the browser (release page links).
+      # GITEA_REPO is server-only: "org/repo" slug on the Gitea instance.
+      PUBLIC_GITEA_BASE: https://gitea.eduluma.org
+      GITEA_REPO: eduluma/lps
+    ports:
+      - "4321:4321"
+    volumes:
+      - ./web:/app/web
+      - lps_web_node_modules:/app/web/node_modules
+    depends_on:
+      - api
+  # cloudflared:
+  #   # Optional. Enable with `--profile tunnel` after putting a token in deploy/compose/.env
+  #   profiles: [ "tunnel" ]
+  #   image: cloudflare/cloudflared:latest
+  #   restart: unless-stopped
+  #   command: [ "tunnel", "--no-autoupdate", "run" ]
+  #   env_file: .env.compose
+  #   environment:
+  #     TUNNEL_TOKEN: ${CLOUDFLARE_TUNNEL_TOKEN:?set CLOUDFLARE_TUNNEL_TOKEN in .env.compose}
+  #   depends_on:
+  #     - api
+  #     - web
+
+volumes:
+  lps_pgdata:
+  lps_web_node_modules:

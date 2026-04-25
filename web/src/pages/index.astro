@@ -1,0 +1,407 @@
+---
+import { API_BASE } from "../lib/api";
+
+// Browser-facing base for display in curl examples (never the internal Docker URL)
+const publicApiBase: string =
+  import.meta.env.PUBLIC_API_BASE ?? "http://localhost:8000/api/v1";
+const apiDisplayBase = publicApiBase.replace(/\/api\/v1\/?$/, "");
+
+let distros: any[] = [];
+let stats: { distro: string; count: number }[] = [];
+let total = 0;
+let distrosCount = 0;
+let suggestionsPending = 0;
+
+try {
+  const [distrosRes, statsRes] = await Promise.all([
+    fetch(`${API_BASE}/distros`),
+    fetch(`${API_BASE}/stats`),
+  ]);
+  if (distrosRes.ok) distros = (await distrosRes.json()).distros ?? [];
+  if (statsRes.ok) {
+    const s = await statsRes.json();
+    stats = s.by_distro ?? [];
+    total = s.total ?? 0;
+    distrosCount = s.distros_count ?? stats.length;
+    suggestionsPending = s.suggestions_pending ?? 0;
+  }
+} catch {
+  /* API not reachable — page renders without live stats */
+}
+---
+
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width" />
+    <title>LPS — Linux Package Search</title>
+    <meta
+      name="description"
+      content="Search Linux packages across Debian, Ubuntu, Alpine, Arch, Fedora and more. One query, one install command."
+    />
+  </head>
+  <body class="min-h-screen bg-stone-50 text-stone-900 antialiased">
+    <!-- ── Hero ──────────────────────────────────────────────────── -->
+    <div class="bg-stone-950 text-white">
+      <div class="max-w-5xl mx-auto px-6">
+        <header class="flex items-center justify-between py-5">
+          <a href="/" class="font-bold text-xl tracking-tight text-white">LPS</a
+          >
+          <nav class="text-sm space-x-5 text-stone-400">
+            <a href="/search" class="hover:text-white transition-colors"
+              >Search</a
+            >
+            <a href="/distros" class="hover:text-white transition-colors"
+              >Distros</a
+            >
+            <a href="/suggestions" class="hover:text-white transition-colors"
+              >Suggestions</a
+            >
+            <a
+              href="/suggest"
+              class="hover:text-white transition-colors font-medium text-stone-200"
+              >+ Suggest</a
+            >
+            <a href="/register" class="hover:text-white transition-colors"
+              >Get Token</a
+            >
+            <a href="/api" class="hover:text-white transition-colors">API</a>
+          </nav>
+        </header>
+
+        <div class="py-20 text-center">
+          <h1 class="text-6xl font-bold tracking-tight leading-tight">
+            Linux Package Search
+          </h1>
+          <p class="mt-5 text-xl text-stone-300">
+            The missing unified package search for Linux.
+          </p>
+          <p class="mt-2 text-stone-500 text-sm">
+            One query → one working install command across Debian, Ubuntu,
+            Alpine, Arch and more.
+          </p>
+
+          <form action="/search" method="get" class="mt-10 max-w-2xl mx-auto">
+            {
+              /* hidden distro input — name/value set by JS when a preference is saved */
+            }
+            <input type="hidden" id="hidden-distro" />
+            <div class="relative">
+              <input
+                name="q"
+                type="text"
+                autofocus
+                placeholder="Search packages, e.g. lazygit, curl, ripgrep…"
+                class="w-full px-6 py-4 rounded-xl text-stone-900 text-lg bg-white shadow-lg focus:outline-none focus:ring-2 focus:ring-stone-400 placeholder:text-stone-400"
+              />
+              <button
+                type="submit"
+                class="absolute right-3 top-1/2 -translate-y-1/2 px-4 py-2 bg-stone-900 text-white text-sm rounded-lg hover:bg-stone-700 transition-colors"
+              >
+                Search
+              </button>
+            </div>
+            <div
+              id="distro-banner"
+              class="hidden mt-3 items-center justify-center gap-2 text-sm"
+            >
+              <span class="text-stone-500">Always searching in:</span>
+              <span
+                id="distro-label"
+                class="font-semibold text-stone-200 capitalize"></span>
+              <button
+                type="button"
+                id="reset-distro"
+                class="text-stone-500 hover:text-stone-300 text-xs underline transition-colors ml-1"
+              >
+                reset
+              </button>
+            </div>
+          </form>
+
+          {/* ── Stat bar ─────────────────────────────────────── */}
+          {
+            total > 0 && (
+              <div class="mt-8 inline-flex items-center gap-0 rounded-xl overflow-hidden border border-stone-700 text-sm">
+                <a
+                  href="/search"
+                  class="flex flex-col items-center px-7 py-3 bg-stone-800/60 hover:bg-stone-700/60 transition-colors"
+                >
+                  <span class="text-2xl font-bold text-white tabular-nums">
+                    {total.toLocaleString()}
+                  </span>
+                  <span class="text-stone-400 text-xs mt-0.5 uppercase tracking-widest">
+                    packages
+                  </span>
+                </a>
+                <div class="w-px self-stretch bg-stone-700" />
+                <a
+                  href="/distros"
+                  class="flex flex-col items-center px-7 py-3 bg-stone-800/60 hover:bg-stone-700/60 transition-colors"
+                >
+                  <span class="text-2xl font-bold text-white tabular-nums">
+                    {distrosCount || stats.length}
+                  </span>
+                  <span class="text-stone-400 text-xs mt-0.5 uppercase tracking-widest">
+                    distros
+                  </span>
+                </a>
+                <div class="w-px self-stretch bg-stone-700" />
+                <a
+                  href="/suggestions"
+                  class="flex flex-col items-center px-7 py-3 bg-stone-800/60 hover:bg-stone-700/60 transition-colors"
+                >
+                  <span class="text-2xl font-bold text-white tabular-nums">
+                    {suggestionsPending.toLocaleString()}
+                  </span>
+                  <span class="text-stone-400 text-xs mt-0.5 uppercase tracking-widest">
+                    suggestions
+                  </span>
+                </a>
+              </div>
+            )
+          }
+        </div>
+      </div>
+    </div>
+
+    <!-- ── Terminal examples ─────────────────────────────────────── -->
+    <div class="bg-stone-900 border-t border-stone-800">
+      <div class="max-w-5xl mx-auto px-6 py-10 grid md:grid-cols-2 gap-8">
+        <div class="min-w-0">
+          <p class="text-stone-500 text-xs uppercase tracking-widest mb-3">
+            Install from your terminal
+          </p>
+          <pre
+            class="font-mono text-sm leading-7 overflow-x-auto"><span class="text-stone-500">$ </span><span class="text-green-400">curl</span><span class="text-stone-300"> -s "{apiDisplayBase}/api/v1/install/lazygit"</span>
+<span class="text-white">sudo apt install lazygit</span>
+
+<span class="text-stone-500">$ </span><span class="text-green-400">curl</span><span class="text-stone-300"> "{apiDisplayBase}/api/v1/install/fd?distro=alpine"</span>
+<span class="text-white">apk add fd</span></pre>
+        </div>
+        <div class="min-w-0">
+          <p class="text-stone-500 text-xs uppercase tracking-widest mb-3">
+            Search via JSON API
+          </p>
+          <pre
+            class="font-mono text-sm leading-7 overflow-x-auto"><span class="text-stone-500">$ </span><span class="text-green-400">curl</span><span class="text-stone-300"> "{apiDisplayBase}/api/v1/search?q=ripgrep" | jq</span>
+<span class="text-stone-400">&#123;</span>
+<span class="text-stone-400">  "query": "ripgrep",</span>
+<span class="text-stone-400">  "results": [</span>
+<span class="text-stone-400">    &#123;"distro": "debian", "package_name": "ripgrep",</span>
+<span class="text-stone-400">     "version": "14.1.0-1", ...&#125;</span>
+<span class="text-stone-400">  ]</span>
+<span class="text-stone-400">&#125;</span></pre>
+        </div>
+      </div>
+    </div>
+
+    <!-- ── Main content ──────────────────────────────────────────── -->
+    <main class="max-w-5xl mx-auto px-6 py-16 space-y-16">
+      <!-- Stats per distro -->
+      {
+        stats.length > 0 && (
+          <section>
+            <h2 class="text-xs font-semibold text-stone-500 uppercase tracking-widest mb-5">
+              Packages per distro
+            </h2>
+            <div class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-3">
+              {stats.map((s) => {
+                const installTemplates = {
+                  debian: "apt install",
+                  ubuntu: "apt install",
+                  alpine: "apk add",
+                  arch: "pacman -S",
+                  fedora: "dnf install",
+                  opensuse: "zypper install",
+                };
+                const cmd = installTemplates[s.distro] ?? s.distro;
+                return (
+                  <div class="group bg-white border border-stone-200 rounded-xl overflow-hidden hover:border-stone-400 hover:shadow-sm transition-all flex flex-col">
+                    <a
+                      href={`/search?q=&distro=${s.distro}`}
+                      class="flex-1 p-4 text-center block"
+                    >
+                      <div class="text-2xl font-bold tabular-nums">
+                        {s.count.toLocaleString()}
+                      </div>
+                      <div class="mt-1 text-xs font-medium text-stone-700 capitalize">
+                        {s.distro}
+                      </div>
+                      <code class="mt-2 block text-[10px] text-stone-400 bg-stone-50 border border-stone-100 rounded px-1.5 py-0.5 truncate group-hover:text-stone-600 transition-colors">
+                        {cmd}
+                      </code>
+                    </a>
+                    <button
+                      type="button"
+                      data-set-distro={s.distro}
+                      class="text-xs text-stone-500 font-medium hover:text-stone-800 hover:bg-stone-100 border-t border-stone-200 py-2 transition-colors w-full"
+                    >
+                      Set as my distro
+                    </button>
+                  </div>
+                );
+              })}
+            </div>
+          </section>
+        )
+      }
+
+      <!-- Supported distros -->
+      {
+        distros.length > 0 && (
+          <section>
+            <h2 class="text-xs font-semibold text-stone-500 uppercase tracking-widest mb-5">
+              Supported distros &amp; releases
+            </h2>
+            <div class="grid sm:grid-cols-2 md:grid-cols-3 gap-4">
+              {distros.map((d: any) => (
+                <div class="bg-white border border-stone-200 rounded-lg p-5">
+                  <div class="flex items-center justify-between mb-3">
+                    <span class="font-semibold capitalize">{d.name}</span>
+                    <code class="text-xs text-stone-500 bg-stone-100 px-2 py-0.5 rounded">
+                      {d.package_manager}
+                    </code>
+                  </div>
+                  <code class="text-xs text-stone-600 bg-stone-50 block px-3 py-2 rounded border border-stone-100 mb-3">
+                    {d.install_command_template?.replace("{pkg}", "package")}
+                  </code>
+                  {d.releases?.length > 0 && (
+                    <div class="flex flex-wrap gap-1.5">
+                      {d.releases.map((r: any) => (
+                        <span
+                          class={
+                            "text-xs px-2 py-0.5 rounded-full border " +
+                            (r.is_stable
+                              ? "border-emerald-200 bg-emerald-50 text-emerald-700"
+                              : "border-stone-200 bg-stone-50 text-stone-500")
+                          }
+                        >
+                          {r.name}
+                          {r.is_lts ? " LTS" : ""}
+                        </span>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
+          </section>
+        )
+      }
+
+      <!-- Feature tiles -->
+      <section class="grid sm:grid-cols-3 gap-5 text-sm">
+        <div class="p-5 rounded-lg bg-white border border-stone-200">
+          <div class="font-semibold mb-1">One install command</div>
+          <p class="text-stone-500 leading-relaxed">
+            Search once, get the right
+            <code class="text-xs bg-stone-100 px-1 rounded">apt install</code>,
+            <code class="text-xs bg-stone-100 px-1 rounded">apk add</code>, or
+            <code class="text-xs bg-stone-100 px-1 rounded">pacman -S</code>
+            for your distro — no guessing.
+          </p>
+        </div>
+        <div class="p-5 rounded-lg bg-white border border-stone-200">
+          <div class="font-semibold mb-1">Open JSON API</div>
+          <p class="text-stone-500 leading-relaxed">
+            Every endpoint is <code class="text-xs bg-stone-100 px-1 rounded"
+              >curl</code
+            >-friendly. Pipe to <code class="text-xs bg-stone-100 px-1 rounded"
+              >jq</code
+            >, use in scripts, or build your own tools on top.
+          </p>
+        </div>
+        <div class="p-5 rounded-lg bg-white border border-stone-200">
+          <div class="font-semibold mb-1">Multi-distro comparison</div>
+          <p class="text-stone-500 leading-relaxed">
+            See all versions across Debian, Ubuntu, Alpine, Arch, and Fedora
+            side-by-side on every package page.
+          </p>
+        </div>
+      </section>
+    </main>
+
+    <script>
+      const PREF_KEY = "lps_preferred_distro";
+
+      function applyPref() {
+        const pref = localStorage.getItem(PREF_KEY);
+        const banner = document.getElementById("distro-banner");
+        const label = document.getElementById("distro-label");
+        const hiddenInput = document.getElementById(
+          "hidden-distro",
+        ) as HTMLInputElement | null;
+
+        if (pref) {
+          banner?.classList.remove("hidden");
+          banner?.classList.add("flex");
+          if (label) label.textContent = pref;
+          if (hiddenInput) {
+            hiddenInput.name = "distro";
+            hiddenInput.value = pref;
+          }
+        } else {
+          banner?.classList.add("hidden");
+          banner?.classList.remove("flex");
+          if (hiddenInput) {
+            hiddenInput.removeAttribute("name");
+            hiddenInput.value = "";
+          }
+        }
+
+        // Reflect active state on the per-card buttons
+        document
+          .querySelectorAll<HTMLButtonElement>("[data-set-distro]")
+          .forEach((btn) => {
+            const isActive = btn.dataset.setDistro === pref;
+            btn.textContent = isActive ? "✓ My distro" : "Set as my distro";
+            btn.classList.toggle("text-stone-700", isActive);
+            btn.classList.toggle("font-semibold", isActive);
+          });
+      }
+
+      document.getElementById("reset-distro")?.addEventListener("click", () => {
+        localStorage.removeItem(PREF_KEY);
+        applyPref();
+      });
+
+      document
+        .querySelectorAll<HTMLButtonElement>("[data-set-distro]")
+        .forEach((btn) => {
+          btn.addEventListener("click", (e) => {
+            e.stopPropagation();
+            const distro = btn.dataset.setDistro!;
+            const current = localStorage.getItem(PREF_KEY);
+            if (current === distro) {
+              localStorage.removeItem(PREF_KEY);
+            } else {
+              localStorage.setItem(PREF_KEY, distro);
+            }
+            applyPref();
+          });
+        });
+
+      applyPref();
+    </script>
+
+    <footer class="border-t border-stone-200 mt-8">
+      <div
+        class="max-w-5xl mx-auto px-6 py-8 text-sm text-stone-400 flex items-center justify-between"
+      >
+        <span
+          >Linux Package Search · <a
+            href="https://eduluma.org"
+            class="hover:text-stone-700 transition-colors">eduluma.org</a
+          ></span
+        >
+        <div class="space-x-4">
+          <a href="/api" class="hover:text-stone-700 transition-colors"
+            >API docs</a
+          >
+        </div>
+      </div>
+    </footer>
+  </body>
+</html>

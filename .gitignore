@@ -1,0 +1,36 @@
+# Editor
+.vscode/
+.idea/
+*.swp
+.DS_Store
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.env
+.env.*
+!.env.example
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+dist/
+build/
+*.egg-info/
+
+# Node / Astro
+node_modules/
+.astro/
+.cache/
+.output/
+web/dist/
+web/version.txt
+
+# Logs
+*.log
+
+# Local data
+data/
+*.sqlite
+*.db

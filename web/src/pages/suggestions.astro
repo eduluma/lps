@@ -1,0 +1,275 @@
+---
+import Base from "../layouts/Base.astro";
+---
+
+<Base title="Suggested Packages — LPS">
+    <div class="flex items-start justify-between mb-6 gap-4 flex-wrap">
+        <div>
+            <h1 class="text-2xl font-semibold mb-1">Suggested Packages</h1>
+            <p class="text-stone-500 text-sm">
+                Community-submitted packages. Upvote the ones you need —
+                highly-voted suggestions get merged first.
+            </p>
+        </div>
+        <a
+            href="/suggest"
+            class="shrink-0 inline-block px-4 py-2 bg-stone-900 text-white text-sm rounded-lg hover:bg-stone-700 transition-colors"
+        >
+            + Suggest a package
+        </a>
+    </div>
+
+    <!-- Sort / filter bar -->
+    <div class="flex items-center gap-3 text-sm text-stone-500 mb-6">
+        <span id="total-label">Loading…</span>
+        <span class="ml-auto text-xs">Sorted by most upvotes</span>
+    </div>
+
+    <div id="list" class="space-y-3"></div>
+    <div id="list-loading" class="py-10 text-center text-stone-400 text-sm">
+        Loading…
+    </div>
+    <div id="list-empty" class="hidden py-20 text-center">
+        <p class="text-stone-400 text-lg mb-4">No suggestions yet.</p>
+        <a
+            href="/suggest"
+            class="inline-block px-5 py-2 bg-stone-900 text-white rounded-lg hover:bg-stone-700 transition-colors text-sm"
+        >
+            Be the first to suggest a package
+        </a>
+    </div>
+
+    <!-- Load more -->
+    <div class="mt-8 text-center">
+        <button
+            id="load-more"
+            class="hidden px-5 py-2 border border-stone-300 rounded-lg text-sm hover:bg-stone-100 transition-colors"
+        >
+            Load more
+        </button>
+    </div>
+</Base>
+
+<script>
+    const API_BASE =
+        (import.meta.env.PUBLIC_API_BASE as string | undefined) ??
+        "http://localhost:8000/api/v1";
+
+    const PAGE = 20;
+    let offset = 0;
+    let total = 0;
+
+    // ── Vote tracking in localStorage ─────────────────────────────────────────
+    const VOTES_KEY = "lps_voted_suggestions";
+    function getVoted(): Set<number> {
+        try {
+            const raw = localStorage.getItem(VOTES_KEY);
+            return new Set(raw ? JSON.parse(raw) : []);
+        } catch {
+            return new Set();
+        }
+    }
+    function setVoted(id: number, voted: boolean) {
+        const s = getVoted();
+        if (voted) s.add(id);
+        else s.delete(id);
+        localStorage.setItem(VOTES_KEY, JSON.stringify([...s]));
+    }
+
+    // ── DOM refs ───────────────────────────────────────────────────────────────
+    const list = document.getElementById("list") as HTMLDivElement;
+    const loading = document.getElementById("list-loading") as HTMLDivElement;
+    const empty = document.getElementById("list-empty") as HTMLDivElement;
+    const loadMoreBtn = document.getElementById(
+        "load-more",
+    ) as HTMLButtonElement;
+    const totalLabel = document.getElementById(
+        "total-label",
+    ) as HTMLSpanElement;
+
+    // ── Distro colours ─────────────────────────────────────────────────────────
+    const DISTRO_COLOUR: Record<string, string> = {
+        debian: "bg-red-100 text-red-700",
+        ubuntu: "bg-orange-100 text-orange-700",
+        alpine: "bg-blue-100 text-blue-700",
+        arch: "bg-sky-100 text-sky-700",
+        fedora: "bg-indigo-100 text-indigo-700",
+        opensuse: "bg-green-100 text-green-700",
+    };
+
+    // ── Render one suggestion card ─────────────────────────────────────────────
+    function renderCard(s: any): HTMLElement {
+        const voted = getVoted().has(s.id);
+        const card = document.createElement("article");
+        card.className =
+            "flex items-start gap-4 rounded-xl border border-stone-200 bg-white px-5 py-4 hover:border-stone-300 transition-colors";
+        card.dataset.id = String(s.id);
+
+        // Vote button (left column)
+        const voteCol = document.createElement("div");
+        voteCol.className = "flex flex-col items-center gap-1 shrink-0 pt-0.5";
+
+        const voteBtn = document.createElement("button");
+        voteBtn.className = `flex flex-col items-center gap-0.5 px-2 py-1.5 rounded-lg border text-sm font-medium transition-colors ${
+            voted
+                ? "border-stone-800 bg-stone-800 text-white"
+                : "border-stone-300 bg-stone-50 text-stone-500 hover:border-stone-500 hover:text-stone-700"
+        }`;
+        voteBtn.dataset.vote = String(s.id);
+        voteBtn.setAttribute("aria-label", voted ? "Retract vote" : "Upvote");
+        voteBtn.innerHTML = `
+      <svg xmlns="http://www.w3.org/2000/svg" class="w-4 h-4" viewBox="0 0 20 20" fill="currentColor">
+        <path fill-rule="evenodd" d="M10 17a.75.75 0 01-.75-.75V5.56L5.03 9.78a.75.75 0 01-1.06-1.06l5.5-5.5a.75.75 0 011.06 0l5.5 5.5a.75.75 0 01-1.06 1.06L10.75 5.56v10.69A.75.75 0 0110 17z" clip-rule="evenodd" />
+      </svg>
+      <span class="vote-count">${s.vote_count}</span>`;
+        voteCol.appendChild(voteBtn);
+        card.appendChild(voteCol);
+
+        // Content column
+        const body = document.createElement("div");
+        body.className = "flex-1 min-w-0";
+
+        // Title row
+        const titleRow = document.createElement("div");
+        titleRow.className = "flex flex-wrap items-center gap-2 mb-1";
+
+        const nameEl = document.createElement("a");
+        nameEl.href = `/p/${encodeURIComponent(s.package_name)}`;
+        nameEl.className = "font-semibold text-stone-900 hover:underline";
+        nameEl.textContent = s.package_name;
+        titleRow.appendChild(nameEl);
+
+        const distroBadge = document.createElement("span");
+        const colour = DISTRO_COLOUR[s.distro] ?? "bg-stone-100 text-stone-600";
+        distroBadge.className = `inline-block rounded-full px-2 py-0.5 text-xs font-medium ${colour}`;
+        distroBadge.textContent = `${s.distro} / ${s.release}`;
+        titleRow.appendChild(distroBadge);
+
+        body.appendChild(titleRow);
+
+        // Description
+        const desc = document.createElement("p");
+        desc.className = "text-sm text-stone-600 mb-2";
+        desc.textContent = s.description;
+        body.appendChild(desc);
+
+        // Install command
+        const pre = document.createElement("pre");
+        pre.className =
+            "text-xs font-mono bg-stone-50 border border-stone-100 rounded-md px-3 py-1.5 text-stone-700 truncate";
+        pre.textContent = s.install_cmd;
+        body.appendChild(pre);
+
+        // Homepage link (if any)
+        if (s.homepage_url) {
+            const link = document.createElement("a");
+            link.href = s.homepage_url;
+            link.target = "_blank";
+            link.rel = "noopener";
+            link.className =
+                "mt-1 inline-block text-xs text-stone-400 hover:text-stone-600 transition-colors truncate max-w-full";
+            link.textContent = s.homepage_url;
+            body.appendChild(link);
+        }
+
+        // Submitter attribution (only for registered users)
+        if (s.submitter_name) {
+            const meta = document.createElement("p");
+            meta.className = "mt-2 text-xs text-stone-400";
+            const typeLabel = s.submitter_type === "org" ? "org" : null;
+            meta.textContent = `Suggested by ${s.submitter_name}${typeLabel ? ` (${typeLabel})` : ""} · ${s.created_at.slice(0, 10)}`;
+            body.appendChild(meta);
+        }
+
+        card.appendChild(body);
+        return card;
+    }
+
+    // ── Fetch and append a page ────────────────────────────────────────────────
+    async function loadPage() {
+        loadMoreBtn.classList.add("hidden");
+        try {
+            const res = await fetch(
+                `${API_BASE}/suggestions?limit=${PAGE}&offset=${offset}`,
+            );
+            if (!res.ok) throw new Error("api error");
+            const data = await res.json();
+
+            loading.classList.add("hidden");
+            total = data.total ?? 0;
+            totalLabel.textContent =
+                total === 0
+                    ? "No suggestions yet"
+                    : `${total} pending suggestion${total === 1 ? "" : "s"}`;
+
+            if (total === 0 && offset === 0) {
+                empty.classList.remove("hidden");
+                return;
+            }
+
+            for (const s of data.suggestions ?? []) {
+                list.appendChild(renderCard(s));
+            }
+
+            offset += data.suggestions?.length ?? 0;
+            if (offset < total) {
+                loadMoreBtn.classList.remove("hidden");
+            }
+        } catch {
+            loading.textContent =
+                "Could not load suggestions. Is the API running?";
+        }
+    }
+
+    loadMoreBtn.addEventListener("click", loadPage);
+
+    // ── Vote handler (event-delegated) ─────────────────────────────────────────
+    list.addEventListener("click", async (e) => {
+        const btn = (e.target as HTMLElement).closest(
+            "[data-vote]",
+        ) as HTMLElement | null;
+        if (!btn) return;
+
+        const id = parseInt(btn.dataset.vote ?? "0", 10);
+        if (!id) return;
+
+        btn.setAttribute("disabled", "");
+
+        try {
+            const res = await fetch(`${API_BASE}/suggestions/${id}/vote`, {
+                method: "POST",
+            });
+            if (!res.ok) throw new Error();
+            const { vote_count, voted } = await res.json();
+
+            // Update count
+            const countEl = btn.querySelector(".vote-count");
+            if (countEl) countEl.textContent = String(vote_count);
+
+            // Update style
+            setVoted(id, voted);
+            if (voted) {
+                btn.className =
+                    btn.className
+                        .replace(
+                            "border-stone-300 bg-stone-50 text-stone-500 hover:border-stone-500 hover:text-stone-700",
+                            "",
+                        )
+                        .trim() + " border-stone-800 bg-stone-800 text-white";
+                btn.setAttribute("aria-label", "Retract vote");
+            } else {
+                btn.className =
+                    btn.className
+                        .replace("border-stone-800 bg-stone-800 text-white", "")
+                        .trim() +
+                    " border-stone-300 bg-stone-50 text-stone-500 hover:border-stone-500 hover:text-stone-700";
+                btn.setAttribute("aria-label", "Upvote");
+            }
+        } finally {
+            btn.removeAttribute("disabled");
+        }
+    });
+
+    // ── Initial load ───────────────────────────────────────────────────────────
+    loadPage();
+</script>

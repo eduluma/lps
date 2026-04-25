@@ -1,0 +1,54 @@
+---
+const { title = "LPS — Linux Package Search" } = Astro.props;
+const version = import.meta.env.APP_VERSION ?? "";
+---
+
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width" />
+    <title>{title}</title>
+    <meta
+      name="description"
+      content="Search Linux packages across distributions. One query, one install command."
+    />
+  </head>
+  <body class="min-h-screen bg-stone-50 text-stone-900 antialiased">
+    <header class="border-b border-stone-200 bg-white">
+      <div
+        class="max-w-4xl mx-auto px-6 py-4 flex items-center justify-between"
+      >
+        <a href="/" class="font-semibold text-lg">LPS</a>
+        <nav class="text-sm space-x-4 text-stone-600">
+          <a href="/search">Search</a>
+          <a href="/distros">Distros</a>
+          <a href="/suggestions">Suggestions</a>
+          <a href="/cli">CLI</a>
+          <a href="/suggest" class="font-medium text-stone-900">+ Suggest</a>
+        </nav>
+      </div>
+    </header>
+    <main class="max-w-4xl mx-auto px-6 py-10"><slot /></main>
+    <footer class="border-t border-stone-200 mt-16">
+      <div
+        class="max-w-4xl mx-auto px-6 py-6 text-sm text-stone-500 flex flex-wrap items-center justify-between gap-4"
+      >
+        <span>Linux Package Search · eduluma.org</span>
+        <nav class="space-x-4">
+          <a href="/distros" class="hover:text-stone-800 transition-colors"
+            >Distros</a
+          >
+          <a href="/suggest" class="hover:text-stone-800 transition-colors"
+            >Suggest a package</a
+          >
+        </nav>
+        {
+          version && (
+            <span class="font-mono text-xs text-stone-400">{version}</span>
+          )
+        }
+      </div>
+    </footer>
+  </body>
+</html>

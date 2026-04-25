@@ -1,0 +1,123 @@
+# values.yaml — LPS Helm chart defaults
+# Override per-environment with values-dev.yaml / values-prod.yaml
+
+# ── Global ───────────────────────────────────────────────────────────────────
+global:
+  env: dev
+  namespace: lps-dev
+  image:
+    registry: ghcr.io/eduluma/lps
+    pullPolicy: IfNotPresent
+    tag: latest
+  imagePullSecrets:
+    - name: ghcr-regcred   # created by: task k8s:secret
+
+# ── API (FastAPI) ─────────────────────────────────────────────────────────────
+api:
+  replicaCount: 1
+  image:
+    repository: ""   # defaults to global.image.registry/api
+    tag: ""
+    pullPolicy: ""
+  service:
+    type: ClusterIP
+    port: 8000
+  ingress:
+    enabled: true
+    className: nginx
+    annotations:
+      cert-manager.io/cluster-issuer: letsencrypt-prod
+      nginx.ingress.kubernetes.io/ssl-redirect: "true"
+      nginx.ingress.kubernetes.io/proxy-body-size: "10m"
+    hosts:
+      - lpsapi.eduluma.org
+    tls:
+      - secretName: lps-api-tls
+        hosts:
+          - lpsapi.eduluma.org
+  resources:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+    limits:
+      cpu: 500m
+      memory: 512Mi
+  env:
+    LOG_LEVEL: info
+    API_CORS_ORIGINS: "https://lps.eduluma.org,https://lpsapi.eduluma.org"
+
+# ── Web (Astro) ───────────────────────────────────────────────────────────────
+web:
+  replicaCount: 1
+  image:
+    repository: ""
+    tag: ""
+    pullPolicy: ""
+  service:
+    type: ClusterIP
+    port: 4321
+  ingress:
+    enabled: true
+    className: nginx
+    annotations:
+      cert-manager.io/cluster-issuer: letsencrypt-prod
+      nginx.ingress.kubernetes.io/ssl-redirect: "true"
+    hosts:
+      - lps.eduluma.org
+    tls:
+      - secretName: lps-web-tls
+        hosts:
+          - lps.eduluma.org
+  resources:
+    requests:
+      cpu: 50m
+      memory: 128Mi
+    limits:
+      cpu: 300m
+      memory: 256Mi
+  env:
+    # Browser-facing URL (user's machine → Cloudflare → api.lps.eduluma.org).
+    # API_INTERNAL_BASE is injected from Release.Name in the template.
+    PUBLIC_API_BASE: "https://api.lps.eduluma.org/api/v1"
+    PUBLIC_GITEA_BASE: "https://gitea.eduluma.org"
+    GITEA_REPO: "eduluma/lps"
+
+# ── Ingest Worker ────────────────────────────────────────────────────────────
+ingestWorker:
+  replicaCount: 1
+  image:
+    repository: ""
+    tag: ""
+    pullPolicy: ""
+  pollInterval: "30"
+  resources:
+    requests:
+      cpu: 50m
+      memory: 128Mi
+    limits:
+      cpu: 500m
+      memory: 512Mi
+
+# ── PostgreSQL ────────────────────────────────────────────────────────────────
+postgresql:
+  enabled: true
+  image:
+    repository: postgres
+    tag: "16-alpine"
+  auth:
+    username: lps
+    password: ""        # set via --set or existingSecret
+    database: lps
+    existingSecret: ""  # name of a pre-created K8s Secret with POSTGRES_* + DATABASE_URL keys
+  persistence:
+    enabled: true
+    size: 5Gi
+    storageClass: ""
+    accessMode: ReadWriteOnce
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      cpu: 500m
+      memory: 512Mi

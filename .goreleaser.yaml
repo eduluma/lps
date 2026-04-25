@@ -1,0 +1,56 @@
+# .goreleaser.yaml — publishes lps CLI binaries to GitHub Releases
+version: 2
+
+project_name: lps
+
+before:
+  hooks:
+    - go mod tidy
+
+builds:
+  - id: lps
+    main: ./cmd/lps
+    binary: lps
+    dir: cli
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - linux
+      - darwin
+      - windows
+    goarch:
+      - amd64
+      - arm64
+    ldflags:
+      - -s -w -X main.version={{.Version}}
+
+archives:
+  - id: lps
+    builds: [lps]
+    name_template: "lps_{{ .Os }}_{{ .Arch }}"
+    format: tar.gz
+    format_overrides:
+      - goos: windows
+        format: zip
+    files:
+      - LICENSE
+      - README.md
+
+checksum:
+  name_template: "lps_{{ .Version }}_checksums.txt"
+  algorithm: sha256
+
+release:
+  github:
+    owner: eduluma
+    name: lps
+  name_template: "v{{.Version}}"
+  draft: false
+
+changelog:
+  sort: asc
+  filters:
+    exclude:
+      - "^docs:"
+      - "^chore:"
+      - "^test:"

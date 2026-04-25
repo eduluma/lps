@@ -1,0 +1,38 @@
+# Persistent ingest-worker: polls ingest_jobs table and runs ingestion tasks.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ .Release.Name }}-ingest-worker
+  namespace: {{ .Values.global.namespace }}
+  labels:
+    app: lps-ingest-worker
+    {{- include "lps.labels" . | nindent 4 }}
+spec:
+  replicas: {{ .Values.ingestWorker.replicaCount }}
+  selector:
+    matchLabels:
+      app: lps-ingest-worker
+  template:
+    metadata:
+      labels:
+        app: lps-ingest-worker
+    spec:
+      {{- with .Values.global.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      containers:
+        - name: ingest-worker
+          image: {{ include "lps.image" (dict "local" .Values.ingestWorker.image "global" .Values.global.image "name" "ingest") }}
+          imagePullPolicy: {{ include "lps.pullPolicy" (dict "local" .Values.ingestWorker.image "global" .Values.global.image) }}
+          command: ["uv", "run", "python", "-m", "lps_ingest.cli", "worker"]
+          env:
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: {{ default (printf "%s-db-credentials" .Release.Name) .Values.postgresql.auth.existingSecret }}
+                  key: DATABASE_URL
+            - name: INGEST_POLL_INTERVAL
+              value: {{ .Values.ingestWorker.pollInterval | quote }}
+          resources:
+            {{- toYaml .Values.ingestWorker.resources | nindent 12 }}

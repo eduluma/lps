@@ -1,0 +1,333 @@
+---
+import Base from "../layouts/Base.astro";
+---
+
+<Base title="Suggest a Package — LPS">
+    <div class="max-w-xl">
+        <h1 class="text-2xl font-semibold mb-1">Suggest a Package</h1>
+        <p class="text-stone-500 text-sm mb-8">
+            Know a Linux package that's missing from LPS? Fill in the template
+            below. Every field follows a strict format so the data stays
+            consistent. Once submitted, other users can upvote your suggestion
+            to prioritise it.
+        </p>
+
+        <div id="form-wrap">
+            <form id="suggest-form" novalidate class="space-y-6">
+                <!-- Distro + Release row -->
+                <div class="grid grid-cols-2 gap-4">
+                    <div>
+                        <label
+                            class="block text-sm font-medium text-stone-700 mb-1"
+                            for="distro"
+                        >
+                            Distro <span class="text-red-500">*</span>
+                        </label>
+                        <select
+                            id="distro"
+                            name="distro"
+                            required
+                            class="w-full rounded-lg border border-stone-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-stone-400 bg-white"
+                        >
+                            <option value="">— choose —</option>
+                            <option value="debian">Debian</option>
+                            <option value="ubuntu">Ubuntu</option>
+                            <option value="alpine">Alpine</option>
+                            <option value="arch">Arch</option>
+                            <option value="fedora">Fedora</option>
+                            <option value="opensuse">openSUSE</option>
+                        </select>
+                    </div>
+
+                    <div>
+                        <label
+                            class="block text-sm font-medium text-stone-700 mb-1"
+                            for="release"
+                        >
+                            Release <span class="text-red-500">*</span>
+                        </label>
+                        <select
+                            id="release"
+                            name="release"
+                            required
+                            class="w-full rounded-lg border border-stone-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-stone-400 bg-white"
+                        >
+                            <option value="">— choose distro first —</option>
+                        </select>
+                    </div>
+                </div>
+
+                <!-- Package name -->
+                <div>
+                    <label
+                        class="block text-sm font-medium text-stone-700 mb-1"
+                        for="package_name"
+                    >
+                        Package name <span class="text-red-500">*</span>
+                    </label>
+                    <input
+                        id="package_name"
+                        name="package_name"
+                        type="text"
+                        required
+                        placeholder="e.g. ripgrep"
+                        class="w-full rounded-lg border border-stone-300 px-3 py-2 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-stone-400"
+                    />
+                    <p class="mt-1 text-xs text-stone-400">
+                        Exact package name used by the distro's package manager
+                        (lowercase).
+                    </p>
+                </div>
+
+                <!-- Install command (auto-generated, editable) -->
+                <div>
+                    <label
+                        class="block text-sm font-medium text-stone-700 mb-1"
+                        for="install_cmd"
+                    >
+                        Install command <span class="text-red-500">*</span>
+                    </label>
+                    <input
+                        id="install_cmd"
+                        name="install_cmd"
+                        type="text"
+                        required
+                        placeholder="auto-filled when you choose distro + package name"
+                        class="w-full rounded-lg border border-stone-300 px-3 py-2 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-stone-400"
+                    />
+                    <p class="mt-1 text-xs text-stone-400">
+                        Auto-generated from the distro's standard template. Edit
+                        only if the package requires a non-standard command
+                        (e.g. a PPA).
+                    </p>
+                </div>
+
+                <!-- Description -->
+                <div>
+                    <label
+                        class="block text-sm font-medium text-stone-700 mb-1"
+                        for="description"
+                    >
+                        Description <span class="text-red-500">*</span>
+                    </label>
+                    <input
+                        id="description"
+                        name="description"
+                        type="text"
+                        required
+                        maxlength="200"
+                        placeholder="One sentence — what does this package do?"
+                        class="w-full rounded-lg border border-stone-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-stone-400"
+                    />
+                    <p class="mt-1 text-xs text-stone-400">
+                        Maximum 200 characters. Copy from the package's man page
+                        or README if unsure.
+                    </p>
+                </div>
+
+                <!-- Homepage (optional) -->
+                <div>
+                    <label
+                        class="block text-sm font-medium text-stone-700 mb-1"
+                        for="homepage_url"
+                    >
+                        Homepage URL
+                    </label>
+                    <input
+                        id="homepage_url"
+                        name="homepage_url"
+                        type="url"
+                        placeholder="https://example.com (optional)"
+                        class="w-full rounded-lg border border-stone-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-stone-400"
+                    />
+                </div>
+
+                <!-- Honeypot: hidden from real users, bots fill it in -->
+                <div class="hidden" aria-hidden="true">
+                    <label for="website">Leave this blank</label>
+                    <input
+                        id="website"
+                        name="website"
+                        type="text"
+                        tabindex="-1"
+                        autocomplete="off"
+                    />
+                </div>
+
+                <div
+                    id="form-error"
+                    class="hidden rounded-lg bg-red-50 border border-red-200 text-red-700 text-sm px-4 py-3"
+                >
+                </div>
+
+                <button
+                    type="submit"
+                    id="submit-btn"
+                    class="w-full bg-stone-900 text-white rounded-lg px-5 py-2.5 text-sm font-medium hover:bg-stone-700 transition-colors disabled:opacity-50"
+                >
+                    Submit suggestion
+                </button>
+            </form>
+        </div>
+    </div>
+</Base>
+
+<script>
+    const API_BASE =
+        (import.meta.env.PUBLIC_API_BASE as string | undefined) ??
+        "http://localhost:8000/api/v1";
+
+    // ── Distro → known releases ───────────────────────────────────────────────
+    const RELEASES: Record<string, string[]> = {
+        debian: ["bookworm", "bullseye", "buster"],
+        ubuntu: ["noble", "jammy", "focal"],
+        alpine: ["3.21", "3.20", "3.19", "edge"],
+        arch: ["rolling"],
+        fedora: ["41", "40", "39"],
+        opensuse: ["tumbleweed", "leap-15.6", "leap-15.5"],
+    };
+
+    // ── Install command templates ─────────────────────────────────────────────
+    const INSTALL_TMPL: Record<string, (n: string) => string> = {
+        debian: (n) => `sudo apt install ${n}`,
+        ubuntu: (n) => `sudo apt install ${n}`,
+        alpine: (n) => `apk add ${n}`,
+        arch: (n) => `sudo pacman -S ${n}`,
+        fedora: (n) => `sudo dnf install ${n}`,
+        opensuse: (n) => `sudo zypper install ${n}`,
+    };
+
+    // ── DOM refs ─────────────────────────────────────────────────────────────
+    const form = document.getElementById("suggest-form") as HTMLFormElement;
+    const distroSel = document.getElementById("distro") as HTMLSelectElement;
+    const relSel = document.getElementById("release") as HTMLSelectElement;
+    const pkgInput = document.getElementById(
+        "package_name",
+    ) as HTMLInputElement;
+    const cmdInput = document.getElementById("install_cmd") as HTMLInputElement;
+    const errBox = document.getElementById("form-error") as HTMLDivElement;
+    const submitBtn = document.getElementById(
+        "submit-btn",
+    ) as HTMLButtonElement;
+    const formWrap = document.getElementById("form-wrap") as HTMLDivElement;
+
+    // Pre-fill package name from ?pkg= query param
+    const prefillPkg = new URLSearchParams(window.location.search).get("pkg");
+    if (prefillPkg && pkgInput) pkgInput.value = prefillPkg;
+
+    // ── Populate release options when distro changes ──────────────────────────
+    distroSel.addEventListener("change", () => {
+        const releases = RELEASES[distroSel.value] ?? [];
+        relSel.innerHTML = releases.length
+            ? releases.map((r) => `<option value="${r}">${r}</option>`).join("")
+            : '<option value="">— choose distro first —</option>';
+        refreshCmd();
+    });
+
+    // ── Auto-fill install command ─────────────────────────────────────────────
+    function refreshCmd() {
+        const d = distroSel.value;
+        const n = pkgInput.value.trim().toLowerCase();
+        if (d && n && INSTALL_TMPL[d]) {
+            // Only overwrite if the user hasn't manually edited it
+            if (!cmdInput.dataset.edited) {
+                cmdInput.value = INSTALL_TMPL[d](n);
+            }
+        }
+    }
+    pkgInput.addEventListener("input", refreshCmd);
+
+    // Mark cmd as manually edited once the user types in it
+    cmdInput.addEventListener("input", () => {
+        cmdInput.dataset.edited = "1";
+    });
+
+    // ── Show error ────────────────────────────────────────────────────────────
+    function showError(msg: string) {
+        errBox.textContent = msg;
+        errBox.classList.remove("hidden");
+        submitBtn.disabled = false;
+    }
+
+    // ── Submit ────────────────────────────────────────────────────────────────
+    form.addEventListener("submit", async (e) => {
+        e.preventDefault();
+        errBox.classList.add("hidden");
+        submitBtn.disabled = true;
+        submitBtn.textContent = "Submitting…";
+
+        const body = {
+            package_name: pkgInput.value.trim().toLowerCase(),
+            distro: distroSel.value,
+            release: relSel.value,
+            install_cmd: cmdInput.value.trim(),
+            description: (
+                document.getElementById("description") as HTMLInputElement
+            ).value.trim(),
+            homepage_url:
+                (
+                    document.getElementById("homepage_url") as HTMLInputElement
+                ).value.trim() || null,
+            website: (document.getElementById("website") as HTMLInputElement)
+                .value,
+        };
+
+        // Basic client-side validation
+        if (!body.package_name) return showError("Package name is required.");
+        if (!body.distro) return showError("Please choose a distro.");
+        if (!body.release) return showError("Please choose a release.");
+        if (!body.install_cmd) return showError("Install command is required.");
+        if (!body.description) return showError("Description is required.");
+
+        try {
+            const res = await fetch(`${API_BASE}/suggestions`, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify(body),
+            });
+
+            if (res.status === 409) {
+                const err = await res.json();
+                return showError(
+                    err.detail ??
+                        "A duplicate suggestion already exists — try upvoting it.",
+                );
+            }
+            if (res.status === 429) {
+                return showError(
+                    "You've submitted too many suggestions today. Try again in 24 hours.",
+                );
+            }
+            if (!res.ok) {
+                const err = await res.json().catch(() => null);
+                const detail = err?.detail;
+                const msg = Array.isArray(detail)
+                    ? detail.map((d: any) => d.msg).join("; ")
+                    : (detail ??
+                      "Submission failed. Please check your inputs.");
+                return showError(msg);
+            }
+
+            // ── Success ──────────────────────────────────────────────────────────
+            formWrap.innerHTML = `
+        <div class="rounded-xl border border-green-200 bg-green-50 p-8 text-center">
+          <p class="text-green-700 font-medium text-lg mb-2">Suggestion submitted!</p>
+          <p class="text-green-600 text-sm mb-6">
+            Thank you. Other users can now upvote it to help prioritise it.
+          </p>
+          <div class="flex justify-center gap-3 text-sm">
+            <a href="/suggestions"
+               class="px-4 py-2 rounded-lg bg-stone-900 text-white hover:bg-stone-700 transition-colors">
+              Browse suggestions
+            </a>
+            <button onclick="location.reload()"
+               class="px-4 py-2 rounded-lg border border-stone-300 hover:bg-stone-100 transition-colors">
+              Submit another
+            </button>
+          </div>
+        </div>`;
+        } catch {
+            showError("Network error — is the API running?");
+        }
+    });
+</script>

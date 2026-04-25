@@ -1,0 +1,51 @@
+# values-dev.yaml — overrides for lps-dev namespace on m1studio
+global:
+  env: dev
+  namespace: lps-dev
+  image:
+    registry: ghcr.io/eduluma/lps
+    tag: latest
+    pullPolicy: Always
+  imagePullSecrets:
+    - name: ghcr-regcred
+
+api:
+  replicaCount: 1
+  ingress:
+    hosts:
+      - lpsapi.eduluma.org
+    tls:
+      - secretName: lps-api-tls
+        hosts:
+          - lpsapi.eduluma.org
+  env:
+    LOG_LEVEL: debug
+    API_CORS_ORIGINS: "https://lps.eduluma.org,http://localhost:4321"
+
+web:
+  replicaCount: 1
+  ingress:
+    hosts:
+      - lps.eduluma.org
+    tls:
+      - secretName: lps-web-tls
+        hosts:
+          - lps.eduluma.org
+  env:
+    PUBLIC_API_BASE: "https://lpsapi.eduluma.org/api/v1"
+    PUBLIC_GITEA_BASE: "https://gitea.eduluma.org"
+    GITEA_REPO: "eduluma/lps"
+
+ingestWorker:
+  replicaCount: 1
+  pollInterval: "30"
+
+postgresql:
+  enabled: true
+  auth:
+    username: lps
+    password: ""  # pass at deploy time: task k8s:deploy (reads K8S_DB_PASSWORD from .env)
+    database: lps
+  persistence:
+    enabled: true
+    size: 5Gi

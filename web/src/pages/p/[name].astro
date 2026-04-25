@@ -1,0 +1,228 @@
+---
+import Base from "../../layouts/Base.astro";
+
+const { name } = Astro.params as { name: string };
+---
+
+<Base title={`${name} — LPS`}>
+  <div id="root" data-pkg={name}>
+    <p class="text-stone-400 text-sm py-10 text-center">Loading&hellip;</p>
+  </div>
+</Base>
+
+<script>
+  const API_BASE =
+    (import.meta.env.PUBLIC_API_BASE as string | undefined) ??
+    "http://localhost:8000/api/v1";
+
+  const installCmds: Record<string, (n: string) => string> = {
+    debian: (n) => `sudo apt install ${n}`,
+    ubuntu: (n) => `sudo apt install ${n}`,
+    alpine: (n) => `apk add ${n}`,
+    arch: (n) => `sudo pacman -S ${n}`,
+    fedora: (n) => `sudo dnf install ${n}`,
+    opensuse: (n) => `sudo zypper install ${n}`,
+  };
+
+  const PREF_KEY = "lps_preferred_distro";
+  const RELEASE_KEY = "lps_preferred_release";
+  const prefDistro = localStorage.getItem(PREF_KEY) ?? "";
+  const prefRelease = localStorage.getItem(RELEASE_KEY) ?? "";
+
+  const root = document.getElementById("root")!;
+  const pkgName = root.dataset.pkg ?? "";
+
+  if (!pkgName) {
+    root.textContent = "Invalid package URL.";
+  } else {
+    fetch(`${API_BASE}/projects/${encodeURIComponent(pkgName)}`)
+      .then((r) => {
+        if (r.status === 404) return null;
+        if (!r.ok) throw new Error("api error");
+        return r.json();
+      })
+      .then((data) => {
+        if (!data) {
+          root.innerHTML = `
+            <div class="text-center py-20">
+              <p class="text-stone-400 text-lg mb-4">
+                No package named <strong class="text-stone-700">${pkgName}</strong> found.
+              </p>
+              <a href="/search?q=${encodeURIComponent(pkgName)}"
+                 class="inline-block px-5 py-2 bg-stone-900 text-white rounded-lg hover:bg-stone-700 transition-colors text-sm">
+                Search for "${pkgName}"
+              </a>
+            </div>`;
+          return;
+        }
+
+        const project = data.project ?? {};
+        const packages: any[] = data.packages ?? [];
+        const distros = [
+          ...new Set<string>(packages.map((p: any) => p.distro)),
+        ];
+
+        // ── Header
+        const header = document.createElement("header");
+        header.className = "mb-8";
+
+        const h1 = document.createElement("h1");
+        h1.className = "text-3xl font-semibold";
+        h1.textContent = pkgName;
+        header.appendChild(h1);
+
+        if (project.description) {
+          const desc = document.createElement("p");
+          desc.className = "mt-2 text-stone-600";
+          desc.textContent = project.description;
+          header.appendChild(desc);
+        }
+        if (project.homepage_url) {
+          const link = document.createElement("a");
+          link.href = project.homepage_url;
+          link.target = "_blank";
+          link.rel = "noopener";
+          link.className =
+            "mt-1 inline-block text-sm text-stone-400 hover:text-stone-700 transition-colors";
+          link.textContent = project.homepage_url;
+          header.appendChild(link);
+        }
+
+        // ── Install section
+        const installSection = document.createElement("section");
+        installSection.className = "mb-10";
+
+        const installHeading = document.createElement("h2");
+        installHeading.className =
+          "text-sm font-medium text-stone-500 uppercase tracking-wide mb-3";
+        installHeading.textContent = "Install";
+        installSection.appendChild(installHeading);
+
+        if (distros.length === 0) {
+          const none = document.createElement("p");
+          none.className = "text-stone-400 text-sm";
+          none.textContent = "No packages indexed yet.";
+          installSection.appendChild(none);
+        } else {
+          const initialDistro =
+            prefDistro && distros.includes(prefDistro)
+              ? prefDistro
+              : distros[0];
+
+          const box = document.createElement("div");
+          box.className = "rounded-lg border border-stone-200 bg-white";
+
+          const tabBar = document.createElement("div");
+          tabBar.className =
+            "flex border-b border-stone-200 text-sm overflow-x-auto";
+
+          const panels: HTMLElement[] = [];
+          distros.forEach((d) => {
+            const isActive = d === initialDistro;
+            const cmd = (
+              installCmds[d] ?? ((n: string) => `# install on ${d}: ${n}`)
+            )(pkgName);
+
+            const tab = document.createElement("button");
+            tab.className = `px-4 py-2 whitespace-nowrap${isActive ? " bg-stone-100 font-medium" : ""}`;
+            tab.dataset.tab = d;
+            tab.textContent = d;
+            tabBar.appendChild(tab);
+
+            const panel = document.createElement("div");
+            panel.className = `relative${isActive ? "" : " hidden"}`;
+            panel.dataset.panel = d;
+            panel.innerHTML = `
+              <pre class="p-5 font-mono text-sm pr-20"><code>${cmd}</code></pre>
+              <button class="absolute right-3 top-3 px-3 py-1.5 text-xs rounded border border-stone-300 bg-stone-50 hover:bg-stone-100 transition-colors" data-copy="${cmd}">Copy</button>`;
+            panels.push(panel);
+          });
+
+          box.appendChild(tabBar);
+          panels.forEach((p) => box.appendChild(p));
+          installSection.appendChild(box);
+
+          tabBar.addEventListener("click", (e) => {
+            const btn = (e.target as HTMLElement).closest(
+              "[data-tab]",
+            ) as HTMLElement | null;
+            if (!btn) return;
+            const active = btn.dataset.tab;
+            tabBar
+              .querySelectorAll("[data-tab]")
+              .forEach((b) => b.classList.toggle("bg-stone-100", b === btn));
+            panels.forEach((p) =>
+              p.classList.toggle("hidden", p.dataset.panel !== active),
+            );
+          });
+        }
+
+        // ── Versions table
+        const versionsSection = document.createElement("section");
+        const versionsHeading = document.createElement("h2");
+        versionsHeading.className =
+          "text-sm font-medium text-stone-500 uppercase tracking-wide mb-3";
+        versionsHeading.textContent = "Versions";
+        versionsSection.appendChild(versionsHeading);
+
+        if (packages.length === 0) {
+          const none = document.createElement("p");
+          none.className = "text-stone-400 text-sm";
+          none.textContent = "No version data available.";
+          versionsSection.appendChild(none);
+        } else {
+          const table = document.createElement("table");
+          table.className =
+            "w-full text-sm bg-white border border-stone-200 rounded-lg overflow-hidden";
+          table.innerHTML = `
+            <thead class="bg-stone-50 text-stone-500">
+              <tr>
+                <th class="text-left p-3">Distro</th>
+                <th class="text-left p-3">Release</th>
+                <th class="text-left p-3">Version</th>
+                <th class="text-left p-3">Last seen</th>
+              </tr>
+            </thead>`;
+          const tbody = document.createElement("tbody");
+          for (const p of packages) {
+            const tr = document.createElement("tr");
+            const isPrefRow =
+              prefDistro === p.distro &&
+              (!prefRelease || prefRelease === p.release);
+            tr.className = isPrefRow
+              ? "border-t border-stone-100 bg-stone-50 font-medium"
+              : "border-t border-stone-100";
+            const safeCols = [
+              `<td class="p-3 capitalize">${p.distro}</td>`,
+              `<td class="p-3">${p.release}</td>`,
+              `<td class="p-3 font-mono">${p.version}</td>`,
+              `<td class="p-3 text-stone-500">${p.last_seen?.slice(0, 10) ?? "—"}</td>`,
+            ].join("");
+            tr.innerHTML = safeCols;
+            tbody.appendChild(tr);
+          }
+          table.appendChild(tbody);
+          versionsSection.appendChild(table);
+        }
+
+        root.replaceChildren(header, installSection, versionsSection);
+
+        // Copy buttons (event-delegated)
+        root.addEventListener("click", async (e) => {
+          const btn = (e.target as HTMLElement).closest(
+            "[data-copy]",
+          ) as HTMLElement | null;
+          if (!btn) return;
+          const text = btn.dataset.copy ?? "";
+          await navigator.clipboard.writeText(text);
+          btn.textContent = "Copied!";
+          setTimeout(() => {
+            btn.textContent = "Copy";
+          }, 2000);
+        });
+      })
+      .catch(() => {
+        root.textContent = "Could not load package data. Is the API running?";
+      });
+  }
+</script>

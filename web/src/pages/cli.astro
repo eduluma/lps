@@ -1,0 +1,346 @@
+---
+import Base from "../layouts/Base.astro";
+
+// Server-side: fetch latest release from Gitea.
+// Set GITEA_REPO and PUBLIC_GITEA_BASE in your environment (docker-compose / .env).
+const GITEA_BASE =
+    import.meta.env.PUBLIC_GITEA_BASE ?? "https://gitea.eduluma.org";
+const GITEA_REPO = import.meta.env.GITEA_REPO ?? "eduluma/lps";
+
+interface GiteaAsset {
+    name: string;
+    browser_download_url: string;
+    size: number;
+    download_count: number;
+}
+interface GiteaRelease {
+    tag_name: string;
+    name: string;
+    body: string;
+    html_url: string;
+    published_at: string;
+    assets: GiteaAsset[];
+}
+
+let release: GiteaRelease | null = null;
+try {
+    const res = await fetch(
+        `${GITEA_BASE}/api/v1/repos/${GITEA_REPO}/releases/latest`,
+        { headers: { Accept: "application/json" } },
+    );
+    if (res.ok) release = (await res.json()) as GiteaRelease;
+} catch {
+    /* Gitea unreachable or no releases published yet */
+}
+
+const version = release?.tag_name ?? null;
+const releasesPageUrl = `${GITEA_BASE}/${GITEA_REPO}/releases`;
+const totalDownloads: number =
+    release?.assets.reduce((sum, a) => sum + (a.download_count ?? 0), 0) ?? 0;
+
+const platforms: {
+    label: string;
+    os: string;
+    arch: string;
+    asset: string;
+    note?: string;
+}[] = [
+    {
+        label: "Linux x86-64",
+        os: "linux",
+        arch: "amd64",
+        asset: "lps_linux_amd64",
+    },
+    {
+        label: "Linux arm64",
+        os: "linux",
+        arch: "arm64",
+        asset: "lps_linux_arm64",
+    },
+    {
+        label: "macOS Apple Silicon",
+        os: "darwin",
+        arch: "arm64",
+        asset: "lps_darwin_arm64",
+    },
+    {
+        label: "macOS Intel",
+        os: "darwin",
+        arch: "amd64",
+        asset: "lps_darwin_amd64",
+    },
+    {
+        label: "Windows x86-64",
+        os: "windows",
+        arch: "amd64",
+        asset: "lps_windows_amd64.exe",
+        note: "exe",
+    },
+];
+
+function findUrl(assetName: string): string | null {
+    return (
+        release?.assets.find((a) => a.name === assetName)
+            ?.browser_download_url ?? null
+    );
+}
+
+function formatDownloads(n: number): string {
+    if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
+    if (n >= 1_000) return `${(n / 1_000).toFixed(1)}k`;
+    return String(n);
+}
+---
+
+<Base title="CLI — LPS">
+    <div class="max-w-2xl">
+        <h1 class="text-2xl font-semibold mb-1">LPS CLI</h1>
+        <p class="text-stone-500 text-sm mb-8">
+            A single static binary for Linux, macOS, and Windows — no runtime
+            required. Search packages, get install commands, and configure your
+            distro once.
+        </p>
+
+        <!-- Version badge -->
+        {
+            version ? (
+                <div class="flex items-center gap-3 mb-8 flex-wrap">
+                    <span class="text-xs font-mono bg-stone-100 border border-stone-200 rounded px-2 py-0.5 text-stone-700">
+                        {version}
+                    </span>
+                    {totalDownloads > 0 && (
+                        <span
+                            class="flex items-center gap-1 text-xs text-stone-500"
+                            title={`${totalDownloads.toLocaleString()} total downloads`}
+                        >
+                            <svg
+                                xmlns="http://www.w3.org/2000/svg"
+                                class="w-3.5 h-3.5"
+                                fill="none"
+                                viewBox="0 0 24 24"
+                                stroke="currentColor"
+                                stroke-width="2"
+                            >
+                                <path
+                                    stroke-linecap="round"
+                                    stroke-linejoin="round"
+                                    d="M4 16v2a2 2 0 002 2h12a2 2 0 002-2v-2M7 10l5 5 5-5M12 15V3"
+                                />
+                            </svg>
+                            {formatDownloads(totalDownloads)} downloads
+                        </span>
+                    )}
+                    <a
+                        href={releasesPageUrl}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        class="text-xs text-stone-500 hover:text-stone-900 transition-colors"
+                    >
+                        All releases →
+                    </a>
+                </div>
+            ) : (
+                <div class="mb-8 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+                    The CLI is in development (Phase 3). Check back soon, or
+                    watch the{" "}
+                    <a
+                        href={releasesPageUrl}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        class="underline hover:no-underline"
+                    >
+                        releases page
+                    </a>{" "}
+                    for the first build.
+                </div>
+            )
+        }
+
+        <!-- Quick install -->
+        <section class="mb-10">
+            <h2
+                class="text-sm font-semibold uppercase tracking-wide text-stone-400 mb-3"
+            >
+                Quick install (Linux / macOS)
+            </h2>
+            <div class="relative group">
+                <pre
+                    class="rounded-lg bg-stone-900 text-stone-100 text-sm px-4 py-3 overflow-x-auto">
+<code>curl -fsSL https://lps.eduluma.org/install.sh | sh</code></pre>
+                <button
+                    type="button"
+                    data-copy="curl -fsSL https://lps.eduluma.org/install.sh | sh"
+                    class="copy-btn absolute top-2 right-2 text-xs px-2 py-1 rounded bg-stone-700 hover:bg-stone-600 text-stone-300 opacity-0 group-hover:opacity-100 transition"
+                >
+                    copy
+                </button>
+            </div>
+            <p class="text-xs text-stone-400 mt-2">
+                Downloads the correct binary for your OS/arch, verifies the
+                checksum, and places it in <code>/usr/local/bin/lps</code>.
+            </p>
+        </section>
+
+        <!-- Per-platform downloads -->
+        <section class="mb-10">
+            <h2
+                class="text-sm font-semibold uppercase tracking-wide text-stone-400 mb-3"
+            >
+                Manual download
+                {
+                    version && (
+                        <span class="font-mono text-stone-300 ml-1">
+                            {version}
+                        </span>
+                    )
+                }
+            </h2>
+            <div
+                class="divide-y divide-stone-200 border border-stone-200 rounded-lg overflow-hidden text-sm"
+            >
+                {
+                    platforms.map(({ label, os, asset, note }) => {
+                        const url = findUrl(asset);
+                        return (
+                            <div class="flex items-center justify-between px-4 py-3 bg-white hover:bg-stone-50 transition-colors">
+                                <div class="flex items-center gap-3">
+                                    <span class="text-base">
+                                        {os === "linux"
+                                            ? "🐧"
+                                            : os === "darwin"
+                                              ? "🍎"
+                                              : "🪟"}
+                                    </span>
+                                    <div>
+                                        <span class="font-medium">{label}</span>
+                                        {note && (
+                                            <span class="ml-1 text-xs text-stone-400">
+                                                .exe
+                                            </span>
+                                        )}
+                                    </div>
+                                </div>
+                                {url ? (
+                                    <a
+                                        href={url}
+                                        class="text-xs font-mono px-3 py-1.5 rounded-lg bg-stone-900 text-white hover:bg-stone-700 transition-colors"
+                                    >
+                                        Download
+                                    </a>
+                                ) : (
+                                    <span class="text-xs text-stone-400 italic">
+                                        coming soon
+                                    </span>
+                                )}
+                            </div>
+                        );
+                    })
+                }
+            </div>
+            {
+                version && (
+                    <p class="text-xs text-stone-400 mt-2">
+                        SHA-256 checksums are published alongside each release
+                        on the{" "}
+                        <a
+                            href={releasesPageUrl}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            class="underline"
+                        >
+                            releases page
+                        </a>
+                        .
+                    </p>
+                )
+            }
+        </section>
+
+        <!-- Usage -->
+        <section class="mb-10">
+            <h2
+                class="text-sm font-semibold uppercase tracking-wide text-stone-400 mb-3"
+            >
+                Usage
+            </h2>
+            <div class="space-y-3">
+                {
+                    [
+                        { cmd: "lps search lazygit", desc: "Search packages" },
+                        {
+                            cmd: "lps install lazygit",
+                            desc: "Print the install command for your distro",
+                        },
+                        {
+                            cmd: "lps info lazygit",
+                            desc: "Full detail + all distro versions",
+                        },
+                        {
+                            cmd: "lps config set distro debian",
+                            desc: "Save your distro preference",
+                        },
+                        {
+                            cmd: "lps config set release bookworm",
+                            desc: "Save your release preference",
+                        },
+                        { cmd: "lps config show", desc: "Show current config" },
+                    ].map(({ cmd, desc }) => (
+                        <div class="rounded-lg bg-stone-100 px-4 py-2.5 flex items-center justify-between gap-4">
+                            <code class="text-xs font-mono text-stone-800">
+                                {cmd}
+                            </code>
+                            <span class="text-xs text-stone-500 shrink-0">
+                                {desc}
+                            </span>
+                        </div>
+                    ))
+                }
+            </div>
+        </section>
+
+        <!-- Config -->
+        <section>
+            <h2
+                class="text-sm font-semibold uppercase tracking-wide text-stone-400 mb-3"
+            >
+                Config file
+            </h2>
+            <p class="text-sm text-stone-500 mb-3">
+                Stored at <code
+                    class="font-mono text-xs bg-stone-100 px-1 py-0.5 rounded"
+                    >~/.config/lps/config.toml</code
+                >. Created on first <code
+                    class="font-mono text-xs bg-stone-100 px-1 py-0.5 rounded"
+                    >lps config set</code
+                >.
+            </p>
+            <pre
+                class="rounded-lg bg-stone-900 text-stone-100 text-xs px-4 py-3 overflow-x-auto leading-relaxed">
+<code>{`[user]
+distro  = "debian"    # overrides auto-detect from /etc/os-release
+release = "bookworm"
+token   = ""          # API key for rate-limit bypass (future)
+
+[api]
+base_url = "https://lps.eduluma.org/api/v1"  # self-hosted override
+
+[output]
+format = "text"   # text | json
+color  = true`}</code></pre>
+        </section>
+    </div>
+</Base>
+
+<script>
+    document.querySelectorAll<HTMLButtonElement>(".copy-btn").forEach((btn) => {
+        btn.addEventListener("click", async () => {
+            const text = btn.dataset.copy ?? "";
+            await navigator.clipboard.writeText(text);
+            const original = btn.textContent;
+            btn.textContent = "copied!";
+            setTimeout(() => {
+                btn.textContent = original;
+            }, 1500);
+        });
+    });
+</script>

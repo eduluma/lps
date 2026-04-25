@@ -1,0 +1,20 @@
+# Use repo root as build context, not deploy/compose/
+.git
+.venv
+**/.venv
+**/node_modules
+**/__pycache__
+**/.pytest_cache
+**/.ruff_cache
+**/.mypy_cache
+**/dist
+**/build
+web/dist
+web/.astro
+api/.venv
+ingest/.venv
+.env
+**/.env
+!**/.env.example
+*.log
+.DS_Store

@@ -1,0 +1,261 @@
+---
+import Base from "../layouts/Base.astro";
+---
+
+<Base title="Search — LPS">
+  <form action="/search" method="get" class="mb-8 flex gap-2">
+    <input
+      id="q"
+      name="q"
+      type="text"
+      autofocus
+      class="flex-1 px-4 py-3 rounded-lg border border-stone-300 focus:outline-none focus:ring-2 focus:ring-stone-400"
+      placeholder="Search packages…"
+    />
+    <button
+      type="submit"
+      class="px-5 py-3 bg-stone-900 text-white rounded-lg hover:bg-stone-700 transition-colors"
+    >
+      Search
+    </button>
+  </form>
+
+  <div
+    id="distro-banner"
+    class="hidden mb-4 items-center gap-2 text-sm bg-stone-50 border border-stone-200 rounded-lg px-4 py-2"
+  >
+    <span class="text-stone-500">Filtered to:</span>
+    <span id="distro-label" class="font-medium text-stone-700 capitalize"
+    ></span>
+    <span id="release-label" class="hidden font-mono text-xs text-stone-500"
+    ></span>
+    <button
+      type="button"
+      id="clear-distro"
+      class="ml-auto text-xs text-stone-400 hover:text-stone-700 underline transition-colors"
+    >
+      clear preference
+    </button>
+  </div>
+
+  <div id="results"></div>
+</Base>
+
+<script>
+  const API_BASE =
+    (import.meta.env.PUBLIC_API_BASE as string | undefined) ??
+    "http://localhost:8000/api/v1";
+
+  const PREF_KEY = "lps_preferred_distro";
+  const RELEASE_KEY = "lps_preferred_release";
+  const urlParams = new URLSearchParams(window.location.search);
+  const q = urlParams.get("q") ?? "";
+  const urlDistro = urlParams.get("distro") ?? "";
+  const urlRelease = urlParams.get("release") ?? "";
+  const prefDistro = localStorage.getItem(PREF_KEY) ?? "";
+  const prefRelease = localStorage.getItem(RELEASE_KEY) ?? "";
+  const distro = urlDistro || prefDistro || "";
+  const release =
+    urlRelease || (distro === prefDistro ? prefRelease : "") || "";
+
+  const input = document.getElementById("q") as HTMLInputElement;
+  const container = document.getElementById("results")!;
+  const banner = document.getElementById("distro-banner");
+  const distroLabel = document.getElementById("distro-label");
+  const releaseLabel = document.getElementById("release-label");
+
+  if (distro) {
+    banner?.classList.remove("hidden");
+    banner?.classList.add("flex");
+    if (distroLabel) distroLabel.textContent = distro;
+    if (release && releaseLabel) {
+      releaseLabel.textContent = release;
+      releaseLabel.classList.remove("hidden");
+    }
+  }
+
+  document.getElementById("clear-distro")?.addEventListener("click", () => {
+    localStorage.removeItem(PREF_KEY);
+    localStorage.removeItem(RELEASE_KEY);
+    const params = new URLSearchParams(window.location.search);
+    params.delete("distro");
+    params.delete("release");
+    const qs = params.toString();
+    window.location.href = `/search${qs ? `?${qs}` : ""}`;
+  });
+
+  if (q) {
+    input.value = q;
+    document.title = `"${q}" — LPS`;
+    container.innerHTML =
+      '<p class="text-stone-500 text-sm">Searching\u2026</p>';
+
+    const searchUrl = new URL(`${API_BASE}/search`);
+    searchUrl.searchParams.set("q", q);
+    if (distro) searchUrl.searchParams.set("distro", distro);
+    if (release) searchUrl.searchParams.set("release", release);
+
+    fetch(searchUrl.toString())
+      .then((r) => (r.ok ? r.json() : Promise.reject(r)))
+      .then(({ results = [] }: { results: any[] }) => {
+        if (results.length === 0) {
+          const wrap = document.createElement("div");
+          wrap.className = "space-y-4";
+
+          const msg = document.createElement("p");
+          msg.className = "text-stone-600";
+          msg.textContent = `No results for "${q}"${distro ? ` in ${distro}${release ? ` ${release}` : ""}` : ""}.`;
+          wrap.appendChild(msg);
+
+          // If filtered, offer to search all distros
+          if (distro) {
+            const allLink = document.createElement("a");
+            allLink.href = `/search?q=${encodeURIComponent(q)}`;
+            allLink.className =
+              "inline-flex items-center gap-1.5 text-sm px-4 py-2 rounded-lg border border-stone-300 bg-white hover:bg-stone-50 hover:border-stone-400 transition-colors";
+            allLink.innerHTML =
+              '<svg class="w-4 h-4 text-stone-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-4.35-4.35M17 11A6 6 0 1 1 5 11a6 6 0 0 1 12 0z"/></svg>' +
+              `Search all distros for <strong class="font-medium">${q}</strong>`;
+            wrap.appendChild(allLink);
+          }
+
+          // Fetch matching suggestions and render them, then show the suggest box
+          const sugUrl = new URL(`${API_BASE}/suggestions`);
+          sugUrl.searchParams.set("q", q);
+          if (distro) sugUrl.searchParams.set("distro", distro);
+
+          fetch(sugUrl.toString())
+            .then((r) => (r.ok ? r.json() : Promise.reject(r)))
+            .then(({ suggestions = [] }: { suggestions: any[] }) => {
+              if (suggestions.length > 0) {
+                const heading = document.createElement("p");
+                heading.className =
+                  "text-xs font-semibold text-stone-500 uppercase tracking-widest mt-6 mb-3";
+                heading.textContent = "Community suggestions";
+                wrap.insertBefore(heading, suggestBox);
+
+                const ul = document.createElement("ul");
+                ul.className =
+                  "divide-y divide-stone-200 bg-white border border-stone-200 rounded-lg mb-2";
+                for (const s of suggestions) {
+                  const li = document.createElement("li");
+                  li.className = "p-4 flex items-start justify-between gap-4";
+
+                  const left = document.createElement("div");
+
+                  const nameRow = document.createElement("div");
+                  nameRow.className = "flex items-center gap-2";
+
+                  const name = document.createElement("span");
+                  name.className = "font-medium text-stone-900";
+                  name.textContent = s.package_name;
+
+                  const badge = document.createElement("span");
+                  badge.className =
+                    "text-xs px-2 py-0.5 rounded-full bg-amber-50 border border-amber-200 text-amber-700";
+                  badge.textContent = "community suggestion";
+
+                  const distroTag = document.createElement("span");
+                  distroTag.className = "text-xs text-stone-500";
+                  distroTag.textContent = `${s.distro}/${s.release}`;
+
+                  nameRow.appendChild(name);
+                  nameRow.appendChild(badge);
+                  nameRow.appendChild(distroTag);
+                  left.appendChild(nameRow);
+
+                  if (s.install_cmd) {
+                    const cmd = document.createElement("code");
+                    cmd.className =
+                      "mt-1 block text-xs text-stone-600 bg-stone-50 border border-stone-100 px-2 py-1 rounded font-mono";
+                    cmd.textContent = s.install_cmd;
+                    left.appendChild(cmd);
+                  }
+
+                  if (s.description) {
+                    const desc = document.createElement("p");
+                    desc.className = "mt-1 text-sm text-stone-500";
+                    desc.textContent = s.description;
+                    left.appendChild(desc);
+                  }
+
+                  const votes = document.createElement("span");
+                  votes.className =
+                    "shrink-0 text-xs text-stone-400 whitespace-nowrap";
+                  votes.textContent = `▲ ${s.vote_count}`;
+
+                  li.appendChild(left);
+                  li.appendChild(votes);
+                  ul.appendChild(li);
+                }
+                wrap.insertBefore(ul, suggestBox);
+              }
+            })
+            .catch(() => {
+              /* suggestions optional */
+            });
+
+          // Suggest link
+          const suggestBox = document.createElement("div");
+          suggestBox.className =
+            "mt-2 rounded-lg border border-stone-200 bg-stone-50 px-5 py-4 flex items-start gap-4";
+          suggestBox.innerHTML = `
+            <div class="mt-0.5 text-stone-400">
+              <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                  d="M9.663 17h4.673M12 3v1m6.364 1.636-.707.707M21 12h-1M4 12H3m1.343-6.657-.707-.707M12 21v-1
+                     M7.05 7.05 6.343 6.343M16.95 7.05l.707-.707M7.05 16.95l-.707.707M16.95 16.95l.707.707
+                     M15 12a3 3 0 1 1-6 0 3 3 0 0 1 6 0z"/>
+              </svg>
+            </div>
+            <div class="flex-1">
+              <p class="text-sm font-medium text-stone-700">Know where to find <em>${q}</em>?</p>
+              <p class="text-xs text-stone-500 mt-0.5">Help the community by suggesting the package — it takes 30 seconds.</p>
+            </div>
+            <a href="/suggest?pkg=${encodeURIComponent(q)}"
+               class="shrink-0 text-sm px-4 py-1.5 rounded-lg bg-stone-900 text-white hover:bg-stone-700 transition-colors">
+              Suggest it
+            </a>`;
+          wrap.appendChild(suggestBox);
+
+          container.replaceChildren(wrap);
+          return;
+        }
+        const ul = document.createElement("ul");
+        ul.className =
+          "divide-y divide-stone-200 bg-white border border-stone-200 rounded-lg";
+        for (const r of results) {
+          const li = document.createElement("li");
+          li.className = "p-5";
+
+          const row = document.createElement("div");
+          row.className = "flex items-baseline justify-between";
+
+          const a = document.createElement("a");
+          a.href = `/p/${r.package_name}`;
+          a.className = "font-medium text-stone-900 hover:underline";
+          a.textContent = r.package_name;
+
+          const badge = document.createElement("span");
+          badge.className = "text-xs text-stone-500";
+          badge.textContent = `${r.distro}/${r.release} · ${r.version}`;
+
+          row.appendChild(a);
+          row.appendChild(badge);
+          li.appendChild(row);
+
+          if (r.description) {
+            const desc = document.createElement("p");
+            desc.className = "mt-1 text-sm text-stone-600";
+            desc.textContent = r.description;
+            li.appendChild(desc);
+          }
+          ul.appendChild(li);
+        }
+        container.replaceChildren(ul);
+      })
+      .catch(() => {
+        container.textContent = "Search unavailable. Is the API running?";
+      });
+  }
+</script>

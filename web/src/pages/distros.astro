@@ -1,0 +1,444 @@
+---
+import Base from "../layouts/Base.astro";
+---
+
+<Base title="Distributions — LPS">
+  <div class="flex items-center justify-between mb-2">
+    <h1 class="text-2xl font-semibold">Distributions</h1>
+    <button
+      type="button"
+      id="request-distro-btn"
+      class="text-sm px-4 py-2 rounded-lg border border-stone-300 bg-white hover:bg-stone-50 transition-colors"
+    >
+      + Request a distro
+    </button>
+  </div>
+  <p class="text-stone-500 text-sm mb-8">
+    Linux distributions currently indexed in LPS.
+  </p>
+
+  <!-- Distro request modal -->
+  <div
+    id="request-modal"
+    class="hidden fixed inset-0 z-50 flex items-center justify-center bg-black/40 px-4"
+  >
+    <div class="bg-white rounded-xl shadow-xl w-full max-w-md p-6 space-y-4">
+      <h2 class="text-lg font-semibold">Request a distro</h2>
+      <p class="text-sm text-stone-500">
+        Tell us about the distro you'd like added. We'll review and respond.
+      </p>
+      <form id="request-form" class="space-y-3">
+        <div>
+          <label class="block text-xs font-medium text-stone-600 mb-1"
+            >Distro name <span class="text-red-500">*</span></label
+          >
+          <input
+            id="req-distro-name"
+            type="text"
+            required
+            maxlength="80"
+            placeholder="e.g. NixOS"
+            class="w-full rounded-lg border border-stone-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-stone-400"
+          />
+        </div>
+        <div>
+          <label class="block text-xs font-medium text-stone-600 mb-1"
+            >Release (optional)</label
+          >
+          <input
+            id="req-release"
+            type="text"
+            maxlength="50"
+            placeholder="e.g. 24.05"
+            class="w-full rounded-lg border border-stone-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-stone-400"
+          />
+        </div>
+        <div>
+          <label class="block text-xs font-medium text-stone-600 mb-1"
+            >Package format</label
+          >
+          <select
+            id="req-format"
+            class="w-full rounded-lg border border-stone-300 px-3 py-2 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-stone-400"
+          >
+            <option value="">— choose if known —</option>
+            <option value="apt">APT (Debian-style)</option>
+            <option value="rpm">RPM repodata (Fedora/SUSE)</option>
+            <option value="apk">apk (Alpine)</option>
+            <option value="aur">AUR / pacman (Arch)</option>
+            <option value="other">Other / unsure</option>
+          </select>
+        </div>
+        <div>
+          <label class="block text-xs font-medium text-stone-600 mb-1"
+            >Package index URL (optional)</label
+          >
+          <input
+            id="req-base-url"
+            type="url"
+            placeholder="https://…"
+            class="w-full rounded-lg border border-stone-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-stone-400"
+          />
+        </div>
+        <div>
+          <label class="block text-xs font-medium text-stone-600 mb-1"
+            >Notes (optional)</label
+          >
+          <textarea
+            id="req-description"
+            rows="2"
+            maxlength="1000"
+            class="w-full rounded-lg border border-stone-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-stone-400"
+            placeholder="Anything else we should know…"></textarea>
+        </div>
+        <div>
+          <label class="block text-xs font-medium text-stone-600 mb-1"
+            >Contact (optional)</label
+          >
+          <input
+            id="req-contact"
+            type="text"
+            maxlength="200"
+            placeholder="email or handle"
+            class="w-full rounded-lg border border-stone-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-stone-400"
+          />
+        </div>
+        <div
+          id="req-error"
+          class="hidden rounded-lg bg-red-50 border border-red-200 text-red-700 text-xs px-3 py-2"
+        >
+        </div>
+        <div class="flex gap-3 pt-1">
+          <button
+            type="submit"
+            id="req-submit"
+            class="flex-1 bg-stone-900 text-white rounded-lg px-4 py-2 text-sm font-medium hover:bg-stone-700 transition-colors"
+          >
+            Submit request
+          </button>
+          <button
+            type="button"
+            id="req-cancel"
+            class="px-4 py-2 text-sm rounded-lg border border-stone-200 hover:bg-stone-50 transition-colors"
+          >
+            Cancel
+          </button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <div id="distros" class="text-stone-500 text-sm">Loading&hellip;</div>
+</Base>
+
+<script>
+  const API_BASE =
+    (import.meta.env.PUBLIC_API_BASE as string | undefined) ??
+    "http://localhost:8000/api/v1";
+
+  const PREF_KEY = "lps_preferred_distro";
+  const RELEASE_KEY = "lps_preferred_release";
+  const TOKEN_KEY = "lps_token";
+
+  const container = document.getElementById("distros")!;
+
+  // ── Relative time helper ─────────────────────────────────────────────────
+  function relativeTime(iso: string): string {
+    const diff = Date.now() - new Date(iso).getTime();
+    const mins = Math.floor(diff / 60_000);
+    if (mins < 2) return "just now";
+    if (mins < 60) return `${mins}m ago`;
+    const hrs = Math.floor(mins / 60);
+    if (hrs < 24) return `${hrs}h ago`;
+    const days = Math.floor(hrs / 24);
+    return `${days}d ago`;
+  }
+
+  // ── Fetch current user role (if token stored) ────────────────────────────
+  let userRole = "viewer";
+  const storedToken = localStorage.getItem(TOKEN_KEY);
+  if (storedToken) {
+    fetch(`${API_BASE}/auth/me`, {
+      headers: { Authorization: `Bearer ${storedToken}` },
+    })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((u) => {
+        if (u?.role) userRole = u.role;
+      })
+      .catch(() => {});
+  }
+
+  function canTrigger(): boolean {
+    return userRole === "maintainer" || userRole === "admin";
+  }
+
+  function buildCards(distros: any[], counts: Record<string, number> = {}) {
+    const grid = document.createElement("div");
+    grid.className = "grid gap-4 sm:grid-cols-2 lg:grid-cols-3";
+
+    for (const d of distros) {
+      const card = document.createElement("div");
+      card.className =
+        "bg-white border border-stone-200 rounded-lg overflow-hidden";
+
+      const body = document.createElement("div");
+      body.className = "p-5 space-y-3";
+
+      // Title row with optional trigger button
+      const titleRow = document.createElement("div");
+      titleRow.className = "flex items-center justify-between";
+      const title = document.createElement("h2");
+      title.className = "font-semibold text-stone-900 capitalize text-lg";
+      title.textContent = d.name;
+      titleRow.appendChild(title);
+
+      if (canTrigger()) {
+        const triggerBtn = document.createElement("button");
+        triggerBtn.type = "button";
+        triggerBtn.title = `Re-index ${d.name}`;
+        triggerBtn.className =
+          "text-xs px-2 py-1 rounded border border-stone-200 text-stone-400 hover:text-stone-700 hover:border-stone-400 transition-colors";
+        triggerBtn.textContent = "↻ Re-index";
+        triggerBtn.addEventListener("click", () =>
+          triggerIngest(d, triggerBtn, distros, counts),
+        );
+        titleRow.appendChild(triggerBtn);
+      }
+      body.appendChild(titleRow);
+
+      // Last indexed badge
+      if (d.last_ingest_at) {
+        const badge = document.createElement("p");
+        badge.className = "text-xs text-stone-400";
+        badge.textContent = `Last indexed ${relativeTime(d.last_ingest_at)}`;
+        if (d.last_ingest_release)
+          badge.textContent += ` (${d.last_ingest_release})`;
+        body.appendChild(badge);
+      }
+
+      if (d.releases?.length) {
+        const prefDistro = localStorage.getItem(PREF_KEY);
+        const prefRelease = localStorage.getItem(RELEASE_KEY);
+        const releaseList = document.createElement("ul");
+        releaseList.className = "flex flex-wrap gap-2";
+        for (const rel of d.releases) {
+          const isActive = prefDistro === d.name && prefRelease === rel.name;
+          const pill = document.createElement("button");
+          pill.type = "button";
+          pill.className = isActive
+            ? "text-xs px-2 py-1 rounded-full bg-stone-800 text-white font-mono cursor-pointer"
+            : "text-xs px-2 py-1 rounded-full bg-stone-100 text-stone-700 font-mono hover:bg-stone-200 cursor-pointer transition-colors";
+          pill.textContent = isActive ? `✓ ${rel.name}` : rel.name;
+          pill.title = `Set my release to ${d.name} / ${rel.name}`;
+          pill.addEventListener("click", () => {
+            const curDistro = localStorage.getItem(PREF_KEY);
+            const curRelease = localStorage.getItem(RELEASE_KEY);
+            if (curDistro === d.name && curRelease === rel.name) {
+              localStorage.removeItem(RELEASE_KEY);
+            } else {
+              localStorage.setItem(PREF_KEY, d.name);
+              localStorage.setItem(RELEASE_KEY, rel.name);
+            }
+            buildCards(distros, counts);
+          });
+          const li = document.createElement("li");
+          li.appendChild(pill);
+          releaseList.appendChild(li);
+        }
+        body.appendChild(releaseList);
+      } else {
+        const none = document.createElement("p");
+        none.className = "text-xs text-stone-400";
+        none.textContent = "No releases yet";
+        body.appendChild(none);
+      }
+
+      if (counts[d.name] !== undefined) {
+        const badge = document.createElement("p");
+        badge.className = "text-xs text-stone-500";
+        badge.textContent = `${counts[d.name].toLocaleString()} packages`;
+        body.appendChild(badge);
+      }
+
+      card.appendChild(body);
+
+      // "Set as my distro" button (sets distro only, clears release)
+      const btn = document.createElement("button");
+      btn.type = "button";
+      btn.dataset.setDistro = d.name;
+      btn.className =
+        "w-full text-xs font-medium py-2 border-t border-stone-200 text-stone-500 hover:text-stone-800 hover:bg-stone-50 transition-colors";
+      const pref = localStorage.getItem(PREF_KEY);
+      const prefRelease = localStorage.getItem(RELEASE_KEY);
+      const isMyDistro = pref === d.name;
+      btn.textContent =
+        isMyDistro && prefRelease
+          ? `✓ My distro (${prefRelease})`
+          : isMyDistro
+            ? "✓ My distro"
+            : "Set as my distro";
+      if (isMyDistro) btn.classList.add("text-stone-700", "font-semibold");
+      btn.addEventListener("click", () => {
+        const current = localStorage.getItem(PREF_KEY);
+        if (current === d.name) {
+          localStorage.removeItem(PREF_KEY);
+          localStorage.removeItem(RELEASE_KEY);
+        } else {
+          localStorage.setItem(PREF_KEY, d.name);
+          localStorage.removeItem(RELEASE_KEY);
+        }
+        buildCards(distros, counts);
+      });
+      card.appendChild(btn);
+
+      grid.appendChild(card);
+    }
+
+    container.replaceChildren(grid);
+  }
+
+  // ── Trigger ingest ────────────────────────────────────────────────────────
+  async function triggerIngest(
+    d: any,
+    btn: HTMLButtonElement,
+    distros: any[],
+    counts: Record<string, number>,
+  ) {
+    // If distro has releases, pick the first; otherwise show a prompt
+    const release =
+      d.releases?.[0]?.name ?? prompt(`Release to re-index for ${d.name}:`);
+    if (!release) return;
+    btn.disabled = true;
+    btn.textContent = "Queuing…";
+    try {
+      const resp = await fetch(`${API_BASE}/ingest/${d.name}/${release}`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${storedToken}` },
+      });
+      const body = await resp.json();
+      if (!resp.ok) {
+        alert(body.detail ?? "Failed to queue ingest.");
+      } else {
+        btn.textContent = `✓ Queued #${body.id}`;
+        setTimeout(() => {
+          btn.textContent = "↻ Re-index";
+          btn.disabled = false;
+        }, 5000);
+        return;
+      }
+    } catch {
+      alert("Network error — could not reach the API.");
+    }
+    btn.textContent = "↻ Re-index";
+    btn.disabled = false;
+  }
+
+  fetch(`${API_BASE}/distros`)
+    .then((r) => (r.ok ? r.json() : Promise.reject(r)))
+    .then(({ distros = [] }: { distros: any[] }) => {
+      if (distros.length === 0) {
+        container.textContent = "No distributions indexed yet.";
+        return;
+      }
+
+      buildCards(distros);
+
+      fetch(`${API_BASE}/stats`)
+        .then((r) => (r.ok ? r.json() : Promise.reject(r)))
+        .then(
+          ({
+            by_distro = [],
+          }: {
+            by_distro: { distro: string; count: number }[];
+          }) => {
+            const counts = Object.fromEntries(
+              by_distro.map(({ distro, count }) => [distro, count]),
+            );
+            buildCards(distros, counts);
+          },
+        )
+        .catch(() => {
+          /* stats are optional */
+        });
+    })
+    .catch(() => {
+      container.textContent =
+        "Could not load distributions. Is the API running?";
+    });
+
+  // ── Request modal ─────────────────────────────────────────────────────────
+  const modal = document.getElementById("request-modal")!;
+  const reqForm = document.getElementById("request-form") as HTMLFormElement;
+  const reqError = document.getElementById("req-error") as HTMLDivElement;
+
+  document
+    .getElementById("request-distro-btn")
+    ?.addEventListener("click", () => {
+      modal.classList.remove("hidden");
+    });
+  document.getElementById("req-cancel")?.addEventListener("click", () => {
+    modal.classList.add("hidden");
+  });
+  modal.addEventListener("click", (e) => {
+    if (e.target === modal) modal.classList.add("hidden");
+  });
+
+  reqForm.addEventListener("submit", async (e) => {
+    e.preventDefault();
+    reqError.classList.add("hidden");
+    const submitBtn = document.getElementById(
+      "req-submit",
+    ) as HTMLButtonElement;
+    submitBtn.disabled = true;
+    submitBtn.textContent = "Submitting…";
+
+    const payload = {
+      distro_name: (
+        document.getElementById("req-distro-name") as HTMLInputElement
+      ).value.trim(),
+      release_name:
+        (
+          document.getElementById("req-release") as HTMLInputElement
+        ).value.trim() || null,
+      format:
+        (document.getElementById("req-format") as HTMLSelectElement).value ||
+        null,
+      base_url:
+        (
+          document.getElementById("req-base-url") as HTMLInputElement
+        ).value.trim() || null,
+      description:
+        (
+          document.getElementById("req-description") as HTMLTextAreaElement
+        ).value.trim() || null,
+      contact_info:
+        (
+          document.getElementById("req-contact") as HTMLInputElement
+        ).value.trim() || null,
+    };
+
+    try {
+      const resp = await fetch(`${API_BASE}/distros/request`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+      const data = await resp.json();
+      if (resp.ok) {
+        reqForm.innerHTML = `<p class="text-stone-700 text-sm py-4 text-center">
+          ✓ Request submitted (ID #${data.id}). We'll review it and follow up.
+        </p>`;
+        setTimeout(() => modal.classList.add("hidden"), 3000);
+      } else {
+        reqError.textContent =
+          data.detail ?? "Submission failed. Please try again.";
+        reqError.classList.remove("hidden");
+      }
+    } catch {
+      reqError.textContent = "Network error — could not reach the API.";
+      reqError.classList.remove("hidden");
+    }
+    submitBtn.disabled = false;
+    submitBtn.textContent = "Submit request";
+  });
+</script>

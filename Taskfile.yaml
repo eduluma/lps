@@ -1,0 +1,338 @@
+version: "3"
+
+# LPS — top-level task runner. Install: https://taskfile.dev
+# Usage: `task` (lists tasks), `task dev`, `task ingest -- debian bookworm`
+
+vars:
+  COMPOSE: docker compose
+
+tasks:
+  default:
+    desc: List tasks
+    cmds: [task --list]
+
+  version:
+    desc: Write web/version.txt from git (run before docker build)
+    cmds:
+      - printf "v$(git rev-list --count HEAD).$(git rev-parse --short HEAD)" > web/version.txt
+
+  dev:
+    desc: Start postgres + api + web + cloudflared via docker compose
+    deps: [version]
+    cmds: ["{{.COMPOSE}} up -d --build"]
+
+  down:
+    desc: Stop the docker compose stack
+    cmds: ["{{.COMPOSE}} down"]
+
+  logs:
+    desc: Tail compose logs
+    cmds: ["{{.COMPOSE}} logs -f"]
+
+  migrate:
+    desc: Apply DB migrations (alembic) — runs inside Docker
+    cmds: ["{{.COMPOSE}} run --rm migrate"]
+
+  seed:
+    desc: Seed distros + releases — runs inside Docker
+    deps: [migrate]
+    cmds: ["{{.COMPOSE}} run --rm seed"]
+
+  ingest:
+    desc: 'Run an ingestion: task ingest -- debian bookworm'
+    cmds: ["{{.COMPOSE}} run --rm ingest {{.CLI_ARGS}}"]
+
+  api:
+    desc: Run API locally (no docker)
+    dir: api
+    cmds: [uv run uvicorn app.main:app --reload --host 0.0.0.0 --port 8000]
+
+  web:
+    desc: Run Astro dev server
+    dir: web
+    cmds: [pnpm dev]
+
+  fmt:
+    desc: Format python + ts
+    cmds:
+      - cd api && uv run ruff format .
+      - cd ingest && uv run ruff format .
+      - cd web && pnpm fmt
+
+  lint:
+    desc: Lint python + ts
+    cmds:
+      - cd api && uv run ruff check .
+      - cd ingest && uv run ruff check .
+      - cd web && pnpm lint
+
+  test:
+    desc: Run all tests
+    cmds:
+      - cd api && uv run pytest
+      - cd ingest && (uv run pytest || [ $? -eq 5 ])
+      - |
+        # Health check
+        curl http://localhost:8000/healthz
+
+  test-distros:
+    cmds:
+      - |
+        # List distros (should return [] since DB is empty)
+        curl http://localhost:8000/api/v1/distros | jq .
+
+  test-search:
+    cmds:
+      - |
+        # Search packages
+        curl "http://localhost:8000/api/v1/search?q=curl" | jq .
+
+  test-pkg:
+    cmds:
+      - |
+        # Search by name
+        curl "http://localhost:8000/api/v1/search?q=curl" | jq .
+
+  test-by-distros:
+    cmds:
+      - |
+        # Filter by distro
+        curl "http://localhost:8000/api/v1/search?q=curl&distro=debian" | jq .
+
+  list-pkg1:
+    cmds:
+      - |
+        # Get a specific package detail
+        curl "http://localhost:8000/api/v1/packages/debian/bookworm/curl" | jq .
+
+  list-pkg2:
+    cmds:
+      - |
+        # List packages with filter
+        curl "http://localhost:8000/api/v1/packages?distro=debian&release=bookworm&q=git" | jq .
+
+  # ── CLI release (goreleaser) ───────────────────────────────────────────────
+  cli:snapshot:
+    desc: "Build CLI binaries locally without releasing (no tag required)"
+    dir: cli
+    cmds:
+      - goreleaser build --snapshot --clean
+
+  cli:release:
+    desc: "Tag + push to GitHub — Actions runs goreleaser automatically on tag push"
+    summary: |
+      Usage:
+        task cli:release TAG=v1.2.3
+      Creates the annotated tag, pushes it to both remotes.
+      GitHub Actions picks up the tag and runs goreleaser.
+    vars:
+      TAG: '{{.TAG | default ""}}'
+    preconditions:
+      - sh: '[ -n "{{.TAG}}" ]'
+        msg: "Set TAG=vX.Y.Z  e.g.  task cli:release TAG=v0.1.0"
+      - sh: "command -v git"
+        msg: "git not found"
+    cmds:
+      - git tag -a {{.TAG}} -m "Release {{.TAG}}"
+      - git push origin {{.TAG}}
+      - git push github {{.TAG}}
+
+  install:
+    desc: Sync uv envs and install pnpm deps
+    cmds:
+      - cd api && uv sync
+      - cd ingest && uv sync
+      - cd web && pnpm install
+
+  # ── GitHub repo hardening ─────────────────────────────────────────────────
+  gh:protect:
+    desc: Apply branch-protection rules to github/main (requires gh CLI + admin rights)
+    cmds:
+      - |
+        gh api repos/eduluma/lps/branches/main/protection \
+          --method PUT \
+          --header "Accept: application/vnd.github+json" \
+          --field required_status_checks=null \
+          --field enforce_admins=true \
+          --field 'required_pull_request_reviews={"required_approving_review_count":1,"dismiss_stale_reviews":true}' \
+          --field 'restrictions=null' \
+          --field allow_force_pushes=false \
+          --field allow_deletions=false
+        echo "Branch protection applied to eduluma/lps:main"
+
+  # ── Kubernetes (m1studio) ──────────────────────────────────────────────────
+  # Docker images  → ghcr.io/eduluma/lps/{api,web,ingest}  (GitHub CR)
+  # CLI binaries   → gitea.eduluma.org/eduluma/lps releases
+  #
+  # First-time setup:
+  #   1. task k8s:login   — log in to ghcr.io with a GitHub PAT
+  #   2. task k8s:secret  — create ghcr pull-secret in lps-dev namespace
+  #   3. task k8s:build && task k8s:push && task k8s:deploy
+
+  k8s:login:
+    desc: Login to ghcr.io (requires GITHUB_TOKEN env var with write:packages scope)
+    cmds:
+      - |
+        if [ -z "$GITHUB_TOKEN" ]; then
+          echo "Error: set GITHUB_TOKEN=<your token> first"
+          echo "  Create one at: https://github.com/settings/tokens/new"
+          echo "  Required scopes: write:packages, read:packages, delete:packages"
+          exit 1
+        fi
+        echo "$GITHUB_TOKEN" | docker login ghcr.io -u eduluma --password-stdin
+
+  k8s:secret:
+    desc: Create ghcr image pull secret in lps-dev namespace
+    cmds:
+      - kubectl create namespace lps-dev --dry-run=client -o yaml | kubectl apply -f -
+      - |
+        if [ -z "$GITHUB_TOKEN" ]; then
+          echo "Error: set GITHUB_TOKEN=<your token> first"; exit 1
+        fi
+        kubectl create secret docker-registry ghcr-regcred \
+          --namespace lps-dev \
+          --docker-server=ghcr.io \
+          --docker-username=eduluma \
+          --docker-password="$GITHUB_TOKEN" \
+          --dry-run=client -o yaml | kubectl apply -f -
+
+  k8s:build:
+    desc: Build and tag all Docker images for k8s
+    deps: [version]
+    vars:
+      TAG:
+        sh: cat web/version.txt
+    cmds:
+      - docker build -t ghcr.io/eduluma/lps/api:latest -t ghcr.io/eduluma/lps/api:{{.TAG}} -f api/Dockerfile .
+      - docker build -t ghcr.io/eduluma/lps/web:latest -t ghcr.io/eduluma/lps/web:{{.TAG}} -f web/Dockerfile web/
+      - docker build -t ghcr.io/eduluma/lps/ingest:latest -t ghcr.io/eduluma/lps/ingest:{{.TAG}} -f ingest/Dockerfile ingest/
+
+  k8s:push:
+    desc: Build (if needed) and push images to ghcr.io/eduluma/lps
+    deps: [k8s:build]
+    vars:
+      TAG:
+        sh: cat web/version.txt
+    cmds:
+      - docker push ghcr.io/eduluma/lps/api:latest
+      - docker push ghcr.io/eduluma/lps/api:{{.TAG}}
+      - docker push ghcr.io/eduluma/lps/web:latest
+      - docker push ghcr.io/eduluma/lps/web:{{.TAG}}
+      - docker push ghcr.io/eduluma/lps/ingest:latest
+      - docker push ghcr.io/eduluma/lps/ingest:{{.TAG}}
+
+  k8s:deploy:
+    desc: helm upgrade --install lps-dev into lps-dev namespace
+    cmds:
+      - |
+        if [ -z "$K8S_DB_PASSWORD" ]; then
+          echo "Error: set K8S_DB_PASSWORD in .env (or export it) before deploying"; exit 1
+        fi
+        helm upgrade --install lps-dev deploy/helm/lps \
+          --namespace lps-dev \
+          -f deploy/helm/lps/values-dev.yaml \
+          --set postgresql.auth.password="$K8S_DB_PASSWORD" \
+          --wait --timeout 5m
+        kubectl rollout restart deployment -n lps-dev \
+          && kubectl rollout status deployment/lps-dev-web -n lps-dev --timeout=90s
+
+
+  k8s:status:
+    desc: Show pods, services, and ingress in lps-dev
+    cmds:
+      - kubectl get pods,svc,ingress -n lps-dev
+
+  k8s:logs:
+    desc: Tail logs from all lps-dev pods
+    cmds:
+      - kubectl logs -n lps-dev -l app.kubernetes.io/instance=lps-dev --all-containers=true -f
+
+  k8s:logs:api:
+    desc: Tail lps-dev api pod logs
+    cmds:
+      - kubectl logs -n lps-dev -l app=lps-api -f
+
+  k8s:logs:web:
+    desc: Tail lps-dev web pod logs
+    cmds:
+      - kubectl logs -n lps-dev -l app=lps-web -f
+
+  k8s:admin-token:
+    desc: Promote the token in ~/.config/lps/config.toml to admin role
+    cmds:
+      - |
+        TOKEN=$(python3 -c "import tomllib; c=tomllib.load(open('$HOME/.config/lps/config.toml','rb')); print(c['user']['token'])")
+        kubectl cp scripts/promote_admin.py lps-dev/$(kubectl get pod -n lps-dev -l app=lps-api -o jsonpath='{.items[0].metadata.name}'):/tmp/promote_admin.py
+        kubectl exec -n lps-dev deploy/lps-dev-api -- uv run python /tmp/promote_admin.py "$TOKEN"
+
+  k8s:ingest:queue:add:
+    desc: 'Enqueue an ingest job via the API (worker picks it up): task k8s:ingest:queue:add -- debian bookworm'
+    cmds:
+      - |
+        DISTRO=$(echo {{.CLI_ARGS}} | awk '{print $1}')
+        RELEASE=$(echo {{.CLI_ARGS}} | awk '{print $2}')
+        if [ -z "$DISTRO" ] || [ -z "$RELEASE" ]; then
+          echo "Usage: task k8s:ingest:queue:add -- <distro> <release>"
+          exit 1
+        fi
+        TOKEN="${LPS_TOKEN:-$(python3 -c "import tomllib; c=tomllib.load(open('$HOME/.config/lps/config.toml','rb')); print(c['user']['token'])" 2>/dev/null)}"
+        if [ -z "$TOKEN" ]; then
+          echo "Error: no token found. Set LPS_TOKEN or run: task k8s:admin-token"
+          exit 1
+        fi
+        curl -sf -X POST "https://lpsapi.eduluma.org/api/v1/ingest/$DISTRO/$RELEASE" \
+          -H "Authorization: Bearer $TOKEN" | jq .
+
+  k8s:ingest:queue:show:
+    desc: Show ingest job queue (pending/running/done/failed)
+    cmds:
+      - |
+        TOKEN="${LPS_TOKEN:-$(python3 -c "import tomllib; c=tomllib.load(open('$HOME/.config/lps/config.toml','rb')); print(c['user']['token'])" 2>/dev/null)}"
+        curl -sf "https://lpsapi.eduluma.org/api/v1/ingest/jobs" \
+          -H "Authorization: Bearer $TOKEN" \
+          | jq '.jobs[] | {id, distro, release, status, started_at, finished_at, packages_upserted, error_message}'
+
+  k8s:ingest:direct:
+    desc: 'Run a one-shot ingest pod directly (bypasses queue): task k8s:ingest:direct -- debian bookworm'
+    cmds:
+      - |
+        kubectl run lps-ingest-$(date +%s) \
+          --namespace lps-dev \
+          --image=ghcr.io/eduluma/lps/ingest:latest \
+          --restart=Never \
+          --overrides='{"spec":{"imagePullSecrets":[{"name":"ghcr-regcred"}]}}' \
+          --env="DATABASE_URL=$(kubectl get secret lps-dev-db-credentials -n lps-dev -o jsonpath='{.data.DATABASE_URL}' | base64 -d)" \
+          --command -- uv run python -m lps_ingest.cli {{.CLI_ARGS}}
+
+  k8s:teardown:
+    desc: Delete lps-dev helm release (keeps PVCs)
+    prompt: "This will delete all lps-dev k8s resources. Continue?"
+    cmds:
+      - helm uninstall lps-dev --namespace lps-dev
+
+  # register: #onetime task. See token at /Users/rt/.config/lps/config.toml
+  #   cmds:
+  #     - |
+  #       curl -X POST https://lpsapi.eduluma.org/api/v1/auth/register \
+  #         -H "Content-Type: application/json" \
+  #         -d '{"email":"admin@eduluma.org","display_name":"Admin","account_type":"individual"}'
+  #       # → {"token": "lps_...", ...}  ← shown once, save it
+
+  suggest:
+    desc: Incompete, not tested yet
+    cmds:
+      - |
+        curl -X POST http://localhost:8000/api/v1/suggestions \
+        -H "Authorization: Bearer lps_..." \
+        -H "Content-Type: application/json" \
+        -d '{...}'
+
+  build-cli:
+    cmds:
+      - cd cli && go build -o lps ./cmd/lps/main.go
+
+  docker-login-eduluma:
+    cmds:
+      - |
+        # use gitea_admin password from .env
+        docker login gitea.eduluma.org -u gitea_admin
